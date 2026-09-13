@@ -15,6 +15,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? settingsAnimation;
     private double settingsPanelTargetWidth = 430;
     private bool closing;
+    private readonly bool enableIndependentDrag;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     private bool isEnabled;
@@ -137,8 +138,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         $"Valve Index force — 左: {LeftValveIndexForce:0.00} / 右: {RightValveIndexForce:0.00}";
 
     public MainViewModel(string libraryPath, string? settingsPath = null,
-        Func<Func<ValveIndexInputSettings>, IFlightRuntime>? runtimeFactory = null)
+        Func<Func<ValveIndexInputSettings>, IFlightRuntime>? runtimeFactory = null, bool enableIndependentDrag = false)
     {
+        this.enableIndependentDrag = enableIndependentDrag;
         settingsStore = new(settingsPath);
         ApplySettings(settingsStore.Load());
         PropertyChanged += SettingsChanged;
@@ -149,6 +151,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 : new MonadoFlightRuntime(libraryPath, CreateValveIndexSettings),
             new UiProgress(Update),
             CreateSettings);
+        if (enableIndependentDrag && OperatingSystem.IsWindows()) controller.RefreshDragConnection();
         if (runtimeFactory is null && !OperatingSystem.IsWindows() && File.Exists(libraryPath))
         {
             Mode = FlightMode.InfiniteWalking;
@@ -177,6 +180,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             return;
 
         settingsStore.Save(CreateSettings());
+        if (enableIndependentDrag && OperatingSystem.IsWindows() && e.PropertyName is nameof(DragEnabled) or nameof(Mode))
+            controller.RefreshDragConnection();
     }
 
     private void ApplySettings(FlugelKranzSettings root)

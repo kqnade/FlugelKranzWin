@@ -45,7 +45,7 @@ public sealed record FlightStatus(
     Vector3? RecentReferenceSpaceMovement = null,
     string? InputDiagnostics = null);
 
-/// <summary>Owns the runtime on one worker. Off retains the offset; reset restores it without disabling the controller.</summary>
+/// <summary>Owns the runtime on one worker. Flight off permits independently enabled Drag without inertia; reset restores the offset.</summary>
 public sealed class FlightController(
     Func<IFlightRuntime> createRuntime,
     IProgress<FlightStatus> progress,
@@ -66,6 +66,17 @@ public sealed class FlightController(
             enabled = value;
             releaseVersion++;
             if (value && (worker is null || worker.IsCompleted)) worker = Task.Run(RunAsync);
+        }
+    }
+
+    public void RefreshDragConnection()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var settings = (getSettings?.Invoke() ?? FlugelKranzSettings.Default).Normalized();
+            if (settings.Mode == FlightMode.FreeFlight && settings.FreeFlight.DragEnabled &&
+                (worker is null || worker.IsCompleted)) worker = Task.Run(RunAsync);
         }
     }
 
@@ -275,10 +286,29 @@ public sealed class FlightController(
                     }
                     else
                     {
+                        bool wasTransitioning = modeTransition is not null || spaceResetTransition is not null;
                         modeTransition = null;
                         spaceResetTransition = null;
-                        freeFlight.Release();
                         infiniteWalking.Release();
+                        if (!enabled && !frame.MotionSuspended && selectedMode == FlightMode.FreeFlight && settings.FreeFlight.DragEnabled)
+                        {
+                            if (appliedMode != selectedMode || wasTransitioning)
+                                freeFlight.SetOffset(runtime.CurrentOffset);
+                            appliedMode = selectedMode;
+                            var dragFrame = frame with
+                            {
+                                PilotAvailable = false,
+                                Left = frame.Left with { Turn = 0, DpadDown = 0 },
+                                Right = frame.Right with { Turn = 0, DpadDown = 0 }
+                            };
+                            var offset = freeFlight.Update(dragFrame, elapsedSeconds, settings.FreeFlight with
+                            {
+                                HeadPilotEnabled = false, DragAccelerationMultiplier = 0,
+                                TurnAccelerationMultiplier = 0, InertiaAccelerationBoostEnabled = false
+                            });
+                            if (offset != runtime.CurrentOffset) runtime.Apply(offset);
+                        }
+                        else freeFlight.Release();
                     }
                     if (tick++ % 10 == 0)
                     {
@@ -291,7 +321,10 @@ public sealed class FlightController(
                             : selectedMode == FlightMode.FreeFlight
                             ? freeFlight.IsTurning || freeFlight.IsHeadPiloting
                             : infiniteWalking.IsTurning;
-                        string message = !enabled ? "オフ — 現在の位置・姿勢を保持しています。"
+                        string message = !enabled ? frame.MotionSuspended ? "飛行 OFF — ダッシュボード表示中は Drag も停止します。"
+                            : selectedMode == FlightMode.FreeFlight && settings.FreeFlight.DragEnabled
+                                ? "飛行 OFF — Drag のみ有効（慣性なし）。入力を離してから掴んでください。"
+                                : "オフ — 現在の位置・姿勢を保持しています。"
                             : frame.MotionSuspended ? "操作を一時停止中 — ダッシュボードを閉じ、スティックと操作ボタンを戻してください。"
                             : modeTransition is not null ? "無限歩行モードへ戻しています…"
                             : spaceResetTransition is not null ? SpaceResetMessage(selectedMode)

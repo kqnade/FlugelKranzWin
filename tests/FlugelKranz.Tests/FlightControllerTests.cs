@@ -8,6 +8,40 @@ namespace FlugelKranz.Tests;
 public class FlightControllerTests
 {
     [Fact]
+    public async Task FlightOffAllowsDragButDoesNotStartReleaseInertiaOrThrust()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, FreeFlightSettings);
+        controller.RefreshDragConnection();
+        await WaitForFrame(runtime, Frame(0,0));
+        await WaitForFrame(runtime, Frame(1,0));
+        await WaitForFrame(runtime, Frame(1,1));
+        await Wait(() => runtime.CurrentOffset.Position.X < -0.9f);
+        await WaitForFrame(runtime, Frame(0,1));
+        var stopped = runtime.CurrentOffset;
+        await WaitForFrame(runtime, Frame(0,2) with { PilotAvailable = true, PilotStick = Vector2.UnitY });
+        await WaitForFrame(runtime, Frame(0,3) with { PilotAvailable = true, PilotStick = Vector2.UnitY });
+        Assert.Equal(stopped,runtime.CurrentOffset);
+        Assert.DoesNotContain(progress.Statuses, s => s.Enabled);
+        Assert.False(runtime.PilotEnabled);
+    }
+
+    [Fact]
+    public async Task DragDisabledAndFlightOffKeepOffsetFixed()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        var settings = FreeFlightSettings() with { FreeFlight = FlightMotionSettings.Default with { DragEnabled = false } };
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.OpenBindings();
+        await WaitForFrame(runtime,Frame(0,0));
+        await WaitForFrame(runtime,Frame(1,0));
+        await WaitForFrame(runtime,Frame(1,2));
+        Assert.Equal(RigidPose.Identity,runtime.CurrentOffset);
+    }
+
+    [Fact]
     public async Task StatusIncludesRuntimeInputDiagnostics()
     {
         var runtime = new FakeRuntime();
