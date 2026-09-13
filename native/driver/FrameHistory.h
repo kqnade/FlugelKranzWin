@@ -114,6 +114,16 @@ public:
         auto pose=physical(p);
         return {valid(pose),pose,dt,false};
     }
+    FrameMatch heldMatch(double now,float prediction,const vr::HmdMatrix34_t& layer) const {
+        if(!count || !std::isfinite(now) || now<lastTick || now-lastTick>50
+            || lastTick-heldSince<250 || !std::isfinite(prediction) || std::abs(prediction)>0.1f) return {};
+        for(const auto& row:layer.m) for(float value:row) if(!std::isfinite(value)) return {};
+        for(int i=0;i<3;i++) for(int j=0;j<3;j++) {
+            double dot=0;for(int k=0;k<3;k++) dot+=layer.m[i][k]*layer.m[j][k];
+            if(std::abs(dot-(i==j?1:0))>0.001) return {};
+        }
+        return {true,heldTransform,0,true};
+    }
     FrameMatch match(double now,float prediction,const vr::HmdMatrix34_t& layer) const {
         FrameMatch best;
         if(!std::isfinite(prediction) || prediction<0 || prediction>0.1f) return best;

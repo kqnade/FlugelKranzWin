@@ -109,7 +109,7 @@ SteamVR MirrorView は正常に見えていても、HMD 内の表示とは一致
 | 回転で黒い縁・暗転・ふらつき | 補正設定とログ、回転保持中か更新中か、頭部運動の有無、HMD 内と MirrorView の違い |
 | 基準空間の変更で停止する | 接続後の Standing 原点変更や他の空間操作ツールの動作。再接続前に状態を確認 |
 
-SteamVR の `logs/vrserver.txt` にフックと `FrameAudit` のログが出ます。通常のインストール先では `C:/Program Files (x86)/Steam/logs/vrserver.txt` です。`history-matched pose correction installed` は補正フックの導入、`timed=1` は時刻ベース補正の使用を示します。`XYZ body-pose transforms v2` という起動ログだけでは補正の有効化は判断できません。
+SteamVR の `logs/vrserver.txt` にフックと `FrameAudit` のログが出ます。通常のインストール先では `C:/Program Files (x86)/Steam/logs/vrserver.txt` です。`history-matched pose correction installed` は補正フックの導入、`timed=1` はそのレイヤーで時刻ベース補正を試みたことを示します。変換保持中は一定の逆変換だけを適用するため `timed=0`・`corrected=1` となり、`held` の件数が増えます。`XYZ body-pose transforms v2` という起動ログだけでは補正の有効化は判断できません。
 
 ## 開発と自動テスト
 

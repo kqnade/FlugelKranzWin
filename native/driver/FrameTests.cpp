@@ -92,5 +92,14 @@ int main() {
     auto translated=flight::Pose{};translated.px=1;
     for(int t=1580;t<=1900;t+=10) history.add(t,flight::apply(p,translated),translated,&p);
     check(!history.canBypassCorrection(1900),"translation-only flight still needs correction");
+    auto arbitraryLayer=flight::matrix(flight::physical(p));
+    auto stableMatch=history.heldMatch(1900,-0.02f,arbitraryLayer);
+    check(stableMatch.found && stableMatch.held && stableMatch.transform.px==1,"stable transform does not fit or replace physical prediction");
+    check(!history.heldMatch(1960,0,arbitraryLayer).found,"held correction needs fresh tracking");
+    check(!history.heldMatch(1900,0.2f,arbitraryLayer).found,"held correction rejects unsupported prediction range");
+    auto badLayer=arbitraryLayer;badLayer.m[0][0]=2;
+    check(!history.heldMatch(1900,0,badLayer).found,"held correction rejects malformed matrices");
+    history.add(1910,oldOutput,old,&p);
+    check(!history.heldMatch(1910,0,arbitraryLayer).found,"changing flight leaves held path immediately");
     std::puts("Frame inverse, delayed commands, prediction, ambiguity and expiration: passed");
 }

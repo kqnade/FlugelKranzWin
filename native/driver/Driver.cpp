@@ -73,7 +73,7 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
     flight::FrameMatch match;
     flight::PhysicalFrame physicalLeft,physicalRight;
     Layer corrected[2];
-    bool identityBypass=false;
+    bool identityBypass=false,usedTimed=false;
     if(correctFramePose) {
         std::lock_guard<std::mutex> lock(historyGate);
         auto frameNow=frameTimeMs();
@@ -81,10 +81,17 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
         if(identityBypass) {
             // Forward the original layer below without copying or predicting it.
         } else if(timeBasedFramePose) {
+            match=frameHistory.heldMatch(frameNow,prediction,pose);
+            auto right=frameHistory.heldMatch(frameNow,eyes[1].flHmdPosePredictionTimeInSecondsFromNow,eyes[1].mHmdPose);
+            if(!right.found) match.found=false;
+            if(!match.found) {
+            usedTimed=true;
             physicalLeft=frameHistory.physicalAt(frameNow,prediction);
             physicalRight=frameHistory.physicalAt(frameNow,eyes[1].flHmdPosePredictionTimeInSecondsFromNow);
             match.found=physicalLeft.found && physicalRight.found;
             match.error=-1; // This path does not perform a virtual-pose fit.
+            match.held=false;
+            }
         } else {
         match=frameHistory.match(frameNow,prediction,pose);
         // Both eyes must identify the same transform; otherwise forward neither.
@@ -94,7 +101,7 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
     }
     if(match.found) {
         std::memcpy(corrected,eyes,sizeof(corrected));
-        if(timeBasedFramePose) {
+        if(usedTimed) {
             corrected[0].mHmdPose=flight::matrix(physicalLeft.pose);
             corrected[1].mHmdPose=flight::matrix(physicalRight.pose);
         } else for(auto& eye:corrected) eye.mHmdPose=flight::removeTransform(eye.mHmdPose,match.transform);
@@ -111,7 +118,7 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
             "commandQxyzw=[%.6f %.6f %.6f %.6f] commandP=[%.6f %.6f %.6f] "
             "physicalQxyzw=[%.6f %.6f %.6f %.6f] physicalP=[%.6f %.6f %.6f]",
             static_cast<unsigned long long>(now),sampled?1:0,
-            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,timeBasedFramePose?1:0,identityBypass?1:0,physicalLeft.predictionSeconds,
+            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,usedTimed?1:0,identityBypass?1:0,physicalLeft.predictionSeconds,
             static_cast<unsigned long long>(submittedLayers.exchange(0)),
             static_cast<unsigned long long>(missedLayers.exchange(0)),
             static_cast<unsigned long long>(heldLayers.exchange(0)),
