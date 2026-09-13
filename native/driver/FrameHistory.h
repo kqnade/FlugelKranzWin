@@ -35,8 +35,9 @@ inline vr::HmdMatrix34_t removeTransform(const vr::HmdMatrix34_t& rendered,Pose 
     return result;
 }
 struct FrameMatch {bool found=false;Pose transform;double error=1;bool held=false;};
+struct PhysicalFrame {bool found=false;Pose pose;double predictionSeconds=0;bool interpolated=false;};
 class FrameHistory {
-    struct Entry {double tick=0;vr::DriverPose_t output{};Pose transform;};
+    struct Entry {double tick=0;vr::DriverPose_t output{};Pose transform;vr::DriverPose_t original{};bool hasOriginal=false;};
     std::array<Entry,128> entries{};
     size_t count=0,next=0;
     double heldSince=0,lastTick=0;
@@ -47,14 +48,62 @@ class FrameHistory {
     }
 public:
     void clear() {count=next=0;heldSince=lastTick=0;}
-    void add(double tick,const vr::DriverPose_t& output,Pose transform) {
+    void add(double tick,const vr::DriverPose_t& output,Pose transform,const vr::DriverPose_t* original=nullptr) {
         if(!output.poseIsValid || !output.deviceIsConnected || !valid(transform)
             || !valid(physical(output)) || !std::isfinite(tick)) {clear();return;}
         if(!count || tick<lastTick || tick-lastTick>100 || !same(transform,heldTransform)) {
             heldSince=tick;heldTransform=transform;
         }
         lastTick=tick;
-        entries[next]={tick,output,transform};next=(next+1)%entries.size();count=std::min(count+1,entries.size());
+        entries[next]={tick,output,transform,original?*original:vr::DriverPose_t{},original!=nullptr};next=(next+1)%entries.size();count=std::min(count+1,entries.size());
+    }
+    PhysicalFrame physicalAt(double now,float prediction) const {
+        // SubmitLayer specifies when this frame's HMD pose was predicted to.
+        // Use that time to recover the physical pose, independently of flight.
+        if(!count || !std::isfinite(prediction) || std::abs(prediction)>0.1f
+            || now<lastTick || now-lastTick>50) return {};
+        const double target=now+prediction*1000;
+        const Entry* before=nullptr;const Entry* after=nullptr;
+        double beforeTime=0,afterTime=0;
+        for(size_t i=0;i<count;i++) {
+            const auto& e=entries[i];
+            if(!e.hasOriginal || now<e.tick || now-e.tick>250
+                || !e.original.poseIsValid || !e.original.deviceIsConnected
+                || !std::isfinite(e.original.poseTimeOffset) || !valid(physical(e.original))) continue;
+            const double time=e.tick+e.original.poseTimeOffset*1000;
+            if(time<=target && (!before || time>beforeTime)) {before=&e;beforeTime=time;}
+            if(time>=target && (!after || time<afterTime)) {after=&e;afterTime=time;}
+        }
+        if(before && after && afterTime>beforeTime && afterTime-beforeTime<=100) {
+            auto a=physical(before->original),b=physical(after->original);
+            const double t=(target-beforeTime)/(afterTime-beforeTime);
+            double dot=a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w;
+            if(dot<0) {b.x=-b.x;b.y=-b.y;b.z=-b.z;b.w=-b.w;dot=-dot;}
+            double wa=1-t,wb=t;
+            if(dot<0.9995) {
+                const double theta=std::acos(std::clamp(dot,0.0,1.0)),s=std::sin(theta);
+                wa=std::sin((1-t)*theta)/s;wb=std::sin(t*theta)/s;
+            }
+            Pose p{wa*a.x+wb*b.x,wa*a.y+wb*b.y,wa*a.z+wb*b.z,wa*a.w+wb*b.w,
+                a.px+(b.px-a.px)*t,a.py+(b.py-a.py)*t,a.pz+(b.pz-a.pz)*t};
+            double n=std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z+p.w*p.w);
+            p.x/=n;p.y/=n;p.z/=n;p.w/=n;
+            return {valid(p),p,0,true};
+        }
+        const Entry* entry=before?before:after;
+        if(!entry) return {};
+        const double dt=(target-(before?beforeTime:afterTime))/1000;
+        if(std::abs(dt)>0.1) return {};
+        auto p=entry->original;
+        for(int j=0;j<3;j++) p.vecPosition[j]+=p.vecVelocity[j]*dt;
+        double speed=std::sqrt(p.vecAngularVelocity[0]*p.vecAngularVelocity[0]+p.vecAngularVelocity[1]*p.vecAngularVelocity[1]+p.vecAngularVelocity[2]*p.vecAngularVelocity[2]);
+        if(!std::isfinite(speed)) return {};
+        if(speed>0) {
+            const double s=std::sin(speed*dt/2)/speed;
+            p.qRotation=multiply({std::cos(speed*dt/2),s*p.vecAngularVelocity[0],s*p.vecAngularVelocity[1],s*p.vecAngularVelocity[2]},p.qRotation);
+        }
+        auto pose=physical(p);
+        return {valid(pose),pose,dt,false};
     }
     FrameMatch match(double now,float prediction,const vr::HmdMatrix34_t& layer) const {
         FrameMatch best;

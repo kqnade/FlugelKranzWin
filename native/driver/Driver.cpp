@@ -41,6 +41,7 @@ std::atomic<uint64_t> nextFrameLog{0};
 std::atomic<uint64_t> submittedLayers{0},missedLayers{0},heldLayers{0};
 bool observeFrames=false;
 bool correctFramePose=false;
+bool timeBasedFramePose=false;
 flight::FrameHistory frameHistory;
 std::mutex historyGate;
 double frameTimeMs() {
@@ -70,17 +71,29 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
         gate.unlock();
     }
     flight::FrameMatch match;
+    flight::PhysicalFrame physicalLeft,physicalRight;
     Layer corrected[2];
     if(correctFramePose) {
         std::lock_guard<std::mutex> lock(historyGate);
-        match=frameHistory.match(frameTimeMs(),prediction,pose);
+        auto frameNow=frameTimeMs();
+        if(timeBasedFramePose) {
+            physicalLeft=frameHistory.physicalAt(frameNow,prediction);
+            physicalRight=frameHistory.physicalAt(frameNow,eyes[1].flHmdPosePredictionTimeInSecondsFromNow);
+            match.found=physicalLeft.found && physicalRight.found;
+            match.error=-1; // This path does not perform a virtual-pose fit.
+        } else {
+        match=frameHistory.match(frameNow,prediction,pose);
         // Both eyes must identify the same transform; otherwise forward neither.
-        auto right=frameHistory.match(frameTimeMs(),eyes[1].flHmdPosePredictionTimeInSecondsFromNow,eyes[1].mHmdPose);
+        auto right=frameHistory.match(frameNow,eyes[1].flHmdPosePredictionTimeInSecondsFromNow,eyes[1].mHmdPose);
         if(!right.found || (match.found && flight::matrixError(flight::matrix(match.transform),flight::matrix(right.transform))>0.04)) match.found=false;
+        }
     }
     if(match.found) {
         std::memcpy(corrected,eyes,sizeof(corrected));
-        for(auto& eye:corrected) eye.mHmdPose=flight::removeTransform(eye.mHmdPose,match.transform);
+        if(timeBasedFramePose) {
+            corrected[0].mHmdPose=flight::matrix(physicalLeft.pose);
+            corrected[1].mHmdPose=flight::matrix(physicalRight.pose);
+        } else for(auto& eye:corrected) eye.mHmdPose=flight::removeTransform(eye.mHmdPose,match.transform);
         submitOriginal(self,corrected);
     } else submitOriginal(self,eyes);
     submittedLayers.fetch_add(1);
@@ -89,12 +102,12 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
     if(log) {
         char message[1400];
         std::snprintf(message,sizeof(message),
-            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f layers=%llu missed=%llu held=%llu "
+            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f timed=%d physicalDt=%.6f layers=%llu missed=%llu held=%llu "
             "layer=[%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f] "
             "commandQxyzw=[%.6f %.6f %.6f %.6f] commandP=[%.6f %.6f %.6f] "
             "physicalQxyzw=[%.6f %.6f %.6f %.6f] physicalP=[%.6f %.6f %.6f]",
             static_cast<unsigned long long>(now),sampled?1:0,
-            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,
+            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,timeBasedFramePose?1:0,physicalLeft.predictionSeconds,
             static_cast<unsigned long long>(submittedLayers.exchange(0)),
             static_cast<unsigned long long>(missedLayers.exchange(0)),
             static_cast<unsigned long long>(heldLayers.exchange(0)),
@@ -182,7 +195,7 @@ void updated(int index,void* host,uint32_t device,const vr::DriverPose_t& input,
         output=flight::apply(input,command);
         if(device==0 && correctFramePose) {
             std::lock_guard<std::mutex> historyLock(historyGate);
-            frameHistory.add(received,output,command);
+            frameHistory.add(received,output,command,&input);
         }
     }
     originals[index](host,device,output,size);
@@ -209,6 +222,7 @@ public:
         observerStopping=false;
         observeFrames=vr::VRSettings()->GetBool("driver_flugelkranz","observeFrames");
         correctFramePose=vr::VRSettings()->GetBool("driver_flugelkranz","correctFramePose");
+        timeBasedFramePose=vr::VRSettings()->GetBool("driver_flugelkranz","timeBasedFramePose");
         const char* versions[]={"IVRServerDriverHost_006","IVRServerDriverHost_005"};
         void* detours[]={reinterpret_cast<void*>(updated0),reinterpret_cast<void*>(updated1)};
         void* addedDetours[]={reinterpret_cast<void*>(added0),reinterpret_cast<void*>(added1)};

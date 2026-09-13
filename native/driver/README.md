@@ -15,7 +15,9 @@ rotation works broadly as intended with render-pose correction enabled. The v2
 body-pose change alone did not resolve persistent black borders. Removing flight
 from the submitted layer pose improved the headset view; MirrorView was already
 reported normal. Head motion with a held flight offset still causes jitter or
-blackouts. The held-transform change below is tested in code but not yet on hardware.
+blackouts in the initial version. The held-transform change below improved this
+according to hardware feedback; simultaneous flight rotation and head motion still
+causes jitter with the pose-fitting path.
 Other headsets, games and FBT combinations have not been systematically validated.
 
 No Chaperone setters are used. Original device poses are published before the
@@ -71,7 +73,25 @@ motion, so a prediction mismatch no longer disables correction while holding a
 rotation. It requires an HMD sample within 50ms. A transform change, invalid pose,
 or sample gap over 100ms restarts the hold window. Frames delayed beyond the
 supported history window remain outside this model. This change still needs an
-on-headset test. Active flight changes continue to use the best-fit matcher.
+on-headset verification beyond the reported improvement. Active flight changes
+continue to use the best-fit matcher unless the time-based option below is enabled.
+
+`timeBasedFramePose=true` (default false, requires correctFramePose) is a further
+candidate for simultaneous head/flight motion. It stores the original DriverPose
+beside each transformed output, and computes the physical head pose for
+`SubmitLayer receipt time + flHmdPosePredictionTimeInSecondsFromNow`. Sample time is
+`pose-update receipt time + poseTimeOffset`. Bracketing physical samples use linear
+position interpolation and quaternion SLERP; otherwise linear/angular velocity
+predicts at most 100ms forward or backward. Head/IMU calibration is retained. Fresh
+tracking within 50ms is required. No virtual-pose similarity or flight-command
+selection is involved. It assigns this physical pose to each eye's metadata while
+preserving textures, projection, bounds and prediction times. Logs show `timed=1`,
+`physicalDt` and `matchError=-1` (no pose-fit error exists in this path).
+
+This association relies on the documented prediction-time meaning and local
+receipt timestamps. It does not reproduce VD/SteamVR prediction exactly, and must
+be tested on hardware for residual timing error. Source and distributed defaults
+remain opt-in; setting timeBasedFramePose=false restores the earlier fitting path.
 
 Audit records also include `layers`, `missed`, and `held`: counts across submitted
 layers since the preceding record, rather than one sampled success/failure per

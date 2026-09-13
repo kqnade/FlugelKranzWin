@@ -68,5 +68,11 @@ int main() {
     std::memcpy(expectedCopy,eyes,sizeof(eyes));
     observedSubmit(expectedSelf,eyes);
     require(forwarded==5 && inFlight==0);
+    timeBasedFramePose=true;expectCopy=true;
+    frameHistory.add(frameTimeMs(),output,transform,&head);
+    for(auto& eye:expectedCopy) eye.mHmdPose=flight::matrix(flight::physical(head));
+    observedSubmit(expectedSelf,eyes);
+    require(forwarded==6 && inFlight==0);
+    require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
     std::puts("Observer forwards original layers and ignores unavailable/unsupported interfaces: passed");
 }

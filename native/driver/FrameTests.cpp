@@ -56,5 +56,27 @@ int main() {
     history.clear();
     p.poseIsValid=false;history.add(1000,p,{});
     check(!history.match(1010,0,flight::matrix(flight::physical(p))).found,"invalid tracking not used");
+    history.clear();p=physicalPose();
+    p.vecVelocity[2]=1;p.poseTimeOffset=0.02;
+    history.add(1000,flight::apply(p,old),old,&p);
+    auto timed=history.physicalAt(1010,0.03f);
+    check(timed.found && std::abs(timed.pose.pz-0.02)<1e-6,"physical frame uses receipt plus driver offset and layer target time");
+    history.clear();
+    auto first=physicalPose();first.vecPosition[0]=0;
+    auto second=physicalPose();second.vecPosition[0]=2;second.qRotation={h,0,h,0};second.poseTimeOffset=0.01;
+    history.add(1000,flight::apply(first,old),old,&first);
+    history.add(1010,flight::apply(second,latest),latest,&second);
+    timed=history.physicalAt(1010,0);
+    check(timed.found && timed.interpolated && std::abs(timed.pose.px-1)<1e-6,"changing virtual command does not affect physical interpolation");
+    check(std::abs(timed.pose.y-std::sin(3.141592653589793/8))<1e-6,"physical head orientation interpolates independently of flight");
+    check(!history.physicalAt(1100,0).found,"stale physical tracking rejected");
+    check(!history.physicalAt(1010,0.2f).found,"physical prediction bounded");
+    history.clear();first.vecVelocity[2]=1;
+    history.add(1000,flight::apply(first,old),old,&first);
+    timed=history.physicalAt(1010,-0.015f);
+    check(timed.found && std::abs(timed.pose.pz+0.005)<1e-6,"late frame uses its past target time");
+    history.clear();
+    history.add(1000,oldOutput,old);
+    check(!history.physicalAt(1010,0).found,"time path requires original physical sample, never transformed output");
     std::puts("Frame inverse, delayed commands, prediction, ambiguity and expiration: passed");
 }
