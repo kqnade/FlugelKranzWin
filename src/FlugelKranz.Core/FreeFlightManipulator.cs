@@ -11,6 +11,7 @@ public sealed class FreeFlightManipulator
     private static readonly FlightMotionSettings DirectManipulationSettings =
         FlightMotionSettings.Default with
         {
+            HeadPilotEnabled = false,
             InertiaCutoffEnabled = false,
             InertiaAccelerationBoostEnabled = false,
             DragAccelerationMultiplier = 0,
@@ -94,9 +95,15 @@ public sealed class FreeFlightManipulator
         var pilotFrame = frame;
         if (settings.HeadPilotEnabled)
             frame = frame with { Left = frame.Left with { Turn = 0 }, Right = frame.Right with { Turn = 0 } };
+        if (!settings.DragEnabled)
+        {
+            if (IsDragging) { CancelDrag(); targetOffset = Offset; }
+            dragHands = 0;
+            leftDragArmed = rightDragArmed = false;
+        }
         byte previousDragHands = dragHands;
         byte previousTurnHands = turnHands;
-        dragHands = ActiveHands(frame, true, previousDragHands);
+        dragHands = settings.DragEnabled ? ActiveHands(frame, true, previousDragHands) : (byte)0;
         turnHands = ActiveHands(frame, false, previousTurnHands);
         if (previousDragHands == BothHands && dragHands is LeftHand or RightHand)
         {

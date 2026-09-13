@@ -217,6 +217,44 @@ public class HeadPilotTests
     }
 
     [Fact]
+    public void HeadPilotAndDragAreEnabledByDefault()
+    {
+        Assert.True(FlightMotionSettings.Default.HeadPilotEnabled);
+        Assert.True(FlightMotionSettings.Default.DragEnabled);
+    }
+
+    [Fact]
+    public void DisablingDragCancelsGrabWithoutReleaseBoostAndRequiresRearm()
+    {
+        var motion = new FreeFlightManipulator(RigidPose.Identity);
+        motion.Update(Frame,0.01f,Settings);
+        var grip = Frame with { Left = Frame.Left with { Drag = 1 } };
+        motion.Update(grip,0.01f,Settings);
+        grip = grip with { Left = grip.Left with { Pose = new(Quaternion.Identity,Vector3.UnitX) } };
+        motion.Update(grip,0.01f,Settings);
+        var before = motion.Offset;
+        motion.Update(grip,0.01f,Settings with { DragEnabled = false });
+        Assert.False(motion.IsDragging);
+        Assert.False(motion.HasLinearInertia);
+        Assert.Equal(before,motion.Offset);
+        motion.Update(grip,0.01f,Settings);
+        Assert.False(motion.IsDragging);
+        motion.Update(grip with { Left = grip.Left with { Drag = 0 } },0.01f,Settings);
+        motion.Update(grip,0.01f,Settings);
+        Assert.True(motion.IsDragging);
+    }
+
+    [Fact]
+    public void DisablingDragStillAllowsStickThrustWithGripHeld()
+    {
+        var motion = new FreeFlightManipulator(RigidPose.Identity);
+        var settings = Settings with { DragEnabled = false };
+        motion.Update(Frame,0.01f,settings);
+        var input = Frame with { PilotStick = Vector2.UnitY, Left = Frame.Left with { Drag = 1 } };
+        Assert.True(motion.Update(input,0.1f,settings).Position.Z < 0);
+    }
+
+    [Fact]
     public void ExperimentalModeDoesNotRunControllerTurn()
     {
         var motion = new FreeFlightManipulator(RigidPose.Identity);

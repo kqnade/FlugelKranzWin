@@ -109,7 +109,15 @@ public class MainViewTests
             Assert.True(vm.HeadPilotEnabled);
             Assert.True(JsonDocument.Parse(File.ReadAllText(settingsPath)).RootElement.GetProperty("freeFlight").GetProperty("headPilotEnabled").GetBoolean());
             vm.ResetHeadPilotCommand.Execute(null);
-            Assert.False(pilot.IsChecked);
+            Assert.True(pilot.IsChecked);
+            var drag = window.GetVisualDescendants().OfType<CheckBox>().Single(c => c.Name == "DragEnabled");
+            Assert.True(drag.IsChecked);
+            drag.IsChecked = false;
+            Assert.False(vm.DragEnabled);
+            Assert.False(JsonDocument.Parse(File.ReadAllText(settingsPath)).RootElement.GetProperty("freeFlight").GetProperty("dragEnabled").GetBoolean());
+            Assert.True(vm.HeadPilotEnabled);
+            vm.ResetDragEnabledCommand.Execute(null);
+            Assert.True(drag.IsChecked);
             Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "2.00 /秒");
             Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "倍率: 1.00");
             Assert.Contains(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "補正値: 0.60 倍");
