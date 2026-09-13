@@ -18,11 +18,11 @@ public sealed record FlightMotionSettings
 
     public bool HeadPilotEnabled { get; init; } = true;
     public bool DragEnabled { get; init; } = true;
-    public TurnOrigin TurnOrigin { get; init; } = TurnOrigin.TrackedElementsMidpoint;
+    public TurnOrigin TurnOrigin { get; init; } = TurnOrigin.Head;
     public bool InertiaCutoffEnabled { get; init; } = true;
-    public float DragCutoffMetresPerSecond { get; init; } = 0.4f;
+    public float DragCutoffMetresPerSecond { get; init; } = 0.05f;
     public float TurnCutoffRadiansPerSecond { get; init; } = MathF.PI / 4;
-    public float DragAccelerationMultiplier { get; init; } = 1;
+    public float DragAccelerationMultiplier { get; init; } = 5;
     public float TurnAccelerationMultiplier { get; init; } = 0.4f;
     public float ZAccelerationMultiplier { get; init; } = 2;
     public bool InertiaAccelerationBoostEnabled { get; init; } = true;
@@ -40,7 +40,7 @@ public sealed record FlightMotionSettings
 
     public FlightMotionSettings Normalized() => this with
     {
-        TurnOrigin = Enum.IsDefined(TurnOrigin) ? TurnOrigin : TurnOrigin.TrackedElementsMidpoint,
+        TurnOrigin = Enum.IsDefined(TurnOrigin) ? TurnOrigin : TurnOrigin.Head,
         DragCutoffMetresPerSecond = Math.Clamp(DragCutoffMetresPerSecond, 0, 5),
         TurnCutoffRadiansPerSecond = Math.Clamp(TurnCutoffRadiansPerSecond, 0, MathF.PI * 4),
         DragAccelerationMultiplier = Math.Clamp(DragAccelerationMultiplier, 0, 5),
@@ -83,7 +83,7 @@ public sealed record FlugelKranzSettings
     public static FlugelKranzSettings Default { get; } = new();
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
-    public FlightMode Mode { get; init; } = FlightMode.InfiniteWalking;
+    public FlightMode Mode { get; init; } = FlightMode.FreeFlight;
     public FlightMotionSettings FreeFlight { get; init; } = FlightMotionSettings.Default;
     public InfiniteWalkingSettings InfiniteWalking { get; init; } = InfiniteWalkingSettings.Default;
     public ValveIndexInputSettings ValveIndex { get; init; } = ValveIndexInputSettings.Default;
@@ -91,7 +91,7 @@ public sealed record FlugelKranzSettings
     public FlugelKranzSettings Normalized() => this with
     {
         SchemaVersion = CurrentSchemaVersion,
-        Mode = Enum.IsDefined(Mode) ? Mode : FlightMode.InfiniteWalking,
+        Mode = Enum.IsDefined(Mode) ? Mode : FlightMode.FreeFlight,
         FreeFlight = (FreeFlight ?? FlightMotionSettings.Default).Normalized(),
         InfiniteWalking = (InfiniteWalking ?? InfiniteWalkingSettings.Default).Normalized(),
         ValveIndex = (ValveIndex ?? ValveIndexInputSettings.Default).Normalized()

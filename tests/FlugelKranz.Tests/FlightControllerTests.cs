@@ -185,7 +185,8 @@ public class FlightControllerTests
     {
         var runtime = new FakeRuntime();
         var progress = new Recorder();
-        await using var controller = new FlightController(() => runtime, progress);
+        await using var controller = new FlightController(() => runtime, progress,
+            () => FlugelKranzSettings.Default with { Mode = FlightMode.InfiniteWalking });
         controller.SetEnabled(true);
         await Wait(() => progress.Statuses.Any(s => s.Connected));
 
@@ -250,7 +251,8 @@ public class FlightControllerTests
             new(1, 2, 3));
         runtime.Apply(current);
         var progress = new Recorder();
-        await using var controller = new FlightController(() => runtime, progress);
+        await using var controller = new FlightController(() => runtime, progress,
+            () => FlugelKranzSettings.Default with { Mode = FlightMode.InfiniteWalking });
         controller.SetEnabled(true);
         await Wait(() => progress.Statuses.Any(s => s.Connected));
 

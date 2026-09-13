@@ -12,6 +12,7 @@ public sealed class FreeFlightManipulator
         FlightMotionSettings.Default with
         {
             HeadPilotEnabled = false,
+            TurnOrigin = TurnOrigin.TrackedElementsMidpoint,
             InertiaCutoffEnabled = false,
             InertiaAccelerationBoostEnabled = false,
             DragAccelerationMultiplier = 0,

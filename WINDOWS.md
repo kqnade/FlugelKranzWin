@@ -53,7 +53,7 @@ cd artifacts/windows-x64
 }
 ```
 
-**ソースの既定値は、上記 3 つの boolean 設定がすべて false です。** ビルドスクリプトはソースの設定を配布先へコピーするため、再ビルド・更新後にも確認してください。SteamVR に同名のユーザー設定がある場合は、そちらが優先されます。
+**ソース・配布の既定値は、実機確認済みの上記 3 つの boolean 設定がすべて true です。** ビルドスクリプトはソースの設定を配布先へコピーするため、再ビルド・更新後にも確認してください。SteamVR に同名のユーザー設定がある場合は、そちらが優先されます。
 
 `correctFramePose` は描画・配信に渡す HMD 姿勢の補正を有効にします。`timeBasedFramePose` はフレームの予測時刻に対応する物理姿勢を補間・予測する方式で、`correctFramePose=true` と併用します。`observeFrames` は観測用フックを有効にする設定です。`observeFrames` と `correctFramePose` の両方が false ならフレームのフックを追加しません。
 

@@ -34,7 +34,7 @@ public class MainViewTests
     {
         string settingsPath = TemporarySettingsPath();
         await using var vm = new MainViewModel("/nonexistent/flugelkranz-test.so", settingsPath);
-        Assert.Equal(40, vm.DragCutoffCentimetresPerSecond);
+        Assert.Equal(5, vm.DragCutoffCentimetresPerSecond, 4);
         Assert.Equal(45, vm.TurnCutoffDegreesPerSecond);
         Assert.Equal(0.4, vm.TurnAccelerationMultiplier);
         Assert.Equal(2, vm.ZAccelerationMultiplier);
@@ -48,7 +48,7 @@ public class MainViewTests
         Assert.Equal(0.05, vm.TurnSmoothSeconds);
         Assert.Equal(1, vm.VectorRotationMultiplier);
         Assert.Equal(0.4, vm.BrakeRampSeconds);
-        Assert.Equal(FlightMode.InfiniteWalking, vm.Mode);
+        Assert.Equal(FlightMode.FreeFlight, vm.Mode);
         Assert.Equal(0, vm.InfiniteDragSmoothSeconds);
         Assert.Equal(0, vm.InfiniteTurnSmoothSeconds);
         Assert.Equal(0, vm.InfiniteTurnHeadSmoothSeconds);
@@ -61,7 +61,7 @@ public class MainViewTests
         {
             var buttons = window.GetVisualDescendants().OfType<Button>().ToArray();
             var toggle = Assert.Single(buttons, b => Equals(b.Content, "OFF"));
-            var mode = Assert.Single(buttons, b => Equals(b.Content, "I"));
+            var mode = Assert.Single(buttons, b => Equals(b.Content, "F"));
             Assert.True(toggle.Bounds.Width > 0);
             Assert.True(toggle.Bounds.Height > 0);
             var settingsButton = Assert.Single(buttons, b => Equals(b.Content, "⚙"));
@@ -101,9 +101,9 @@ public class MainViewTests
             Assert.False(scrollViewer.AllowAutoHide);
             Assert.Equal(12, scrollViewer.Padding.Right);
             var turnOrigin = window.GetVisualDescendants().OfType<CheckBox>().Single(c => c.Name == "UseHeadTurnOrigin");
-            Assert.False(turnOrigin.IsChecked);
-            turnOrigin.IsChecked = true;
-            Assert.True(vm.UseHeadTurnOrigin);
+            Assert.True(turnOrigin.IsChecked);
+            turnOrigin.IsChecked = false;
+            Assert.False(vm.UseHeadTurnOrigin);
             var pilot = window.GetVisualDescendants().OfType<CheckBox>().Single(c => c.Name == "HeadPilotEnabled");
             pilot.IsChecked = true;
             Assert.True(vm.HeadPilotEnabled);
@@ -129,8 +129,8 @@ public class MainViewTests
                 t => t.Text == "Valve Index force — 左: 0.42 / 右: 0.87");
             Assert.True(forceStatus.IsVisible);
             vm.ToggleModeCommand.Execute(null);
-            Assert.Equal(FlightMode.FreeFlight, vm.Mode);
-            Assert.Equal("F", mode.Content);
+            Assert.Equal(FlightMode.InfiniteWalking, vm.Mode);
+            Assert.Equal("I", mode.Content);
             vm.IsEnabled = true;
             vm.Status = "テスト中";
             Assert.Equal("ON", toggle.Content);
@@ -273,8 +273,8 @@ public class MainViewTests
                 "/nonexistent/flugelkranz-test.so",
                 settingsPath);
 
-            Assert.Equal(FlightMode.InfiniteWalking, vm.Mode);
-            Assert.Equal(1, vm.DragAccelerationMultiplier);
+            Assert.Equal(FlightMode.FreeFlight, vm.Mode);
+            Assert.Equal(5, vm.DragAccelerationMultiplier);
             using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
             Assert.Equal(FlugelKranzSettings.CurrentSchemaVersion,
                 document.RootElement.GetProperty("schemaVersion").GetInt32());
@@ -315,7 +315,7 @@ public class MainViewTests
         vm.ResetInfiniteWalkingBoostCommand.Execute(null);
         vm.ResetValveIndexForceThresholdCommand.Execute(null);
 
-        Assert.Equal(40, vm.DragCutoffCentimetresPerSecond);
+        Assert.Equal(5, vm.DragCutoffCentimetresPerSecond, 4);
         Assert.Equal(123, vm.TurnCutoffDegreesPerSecond);
         Assert.Equal(2, vm.ZAccelerationMultiplier);
         Assert.True(vm.InertiaAccelerationBoostEnabled);

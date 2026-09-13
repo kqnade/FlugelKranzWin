@@ -1,8 +1,8 @@
 {
   "driver_flugelkranz": {
     "loadPriority": 100,
-    "observeFrames": false,
-    "correctFramePose": false,
-    "timeBasedFramePose": false
+    "observeFrames": true,
+    "correctFramePose": true,
+    "timeBasedFramePose": true
   }
 }

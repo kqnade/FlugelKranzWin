@@ -11,6 +11,7 @@ public class InertiaTests
     private static readonly FlightMotionSettings Unfiltered = new()
     {
         HeadPilotEnabled = false,
+        DragAccelerationMultiplier = 1,
         TurnOrigin = TurnOrigin.Head,
         InertiaCutoffEnabled = false,
         InertiaAccelerationBoostEnabled = false,
@@ -26,9 +27,10 @@ public class InertiaTests
         var settings = FlightMotionSettings.Default;
 
         Assert.True(settings.InertiaCutoffEnabled);
-        Assert.Equal(0.4f, settings.DragCutoffMetresPerSecond);
+        Assert.Equal(0.05f, settings.DragCutoffMetresPerSecond);
         Assert.Equal(MathF.PI / 4, settings.TurnCutoffRadiansPerSecond);
-        Assert.Equal(1, settings.DragAccelerationMultiplier);
+        Assert.Equal(5, settings.DragAccelerationMultiplier);
+        Assert.Equal(TurnOrigin.Head, settings.TurnOrigin);
         Assert.Equal(0.4f, settings.TurnAccelerationMultiplier);
         Assert.Equal(2, settings.ZAccelerationMultiplier);
         Assert.True(settings.InertiaAccelerationBoostEnabled);

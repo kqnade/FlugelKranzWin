@@ -25,7 +25,7 @@
 - 右手系、メートル、Y 上、-Z 前方です。変換積は右側から適用します。Standing、Raw、ゲーム内座標を区別し、変換順序を明記します。
 - Chaperone や VRChat の水平線設定は書き換えません。現在の Windows 経路では Standing 原点の外部変更を検出すると停止します。
 - ゲームへ渡す仮想頭部姿勢と、表示補正へ渡す物理頭部姿勢を区別します。DirectMode_009 SubmitLayer の補正では画像・投影・予測時間などを保持します。
-- 時刻ベース補正は `correctFramePose=true` と `timeBasedFramePose=true` を併用します。ソース既定値は false です。ビルドが設定をコピーする点に注意してください。
+- 時刻ベース補正は `correctFramePose=true` と `timeBasedFramePose=true` を併用します。observeFrames を含めソース既定値は true です。ビルドが設定をコピーする点に注意してください。
 - Quest 2 + Touch / VD で黒い縁・暗転が改善し、恒等変換時のパススルーと変換保持中の元のフレーム予測を維持する修正後、2026-09-14 にユーザーからふらつき解消の確認を得ています。他の構成まで検証済みとは扱いません。詳細は `WINDOWS.md`。
 - SteamVR の終了・再起動はユーザーが行います。稼働中のドライバー DLL を上書きしません。登録スクリプトも再起動しません。
 

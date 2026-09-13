@@ -46,7 +46,7 @@ OFF 中も heartbeat と変換を保持します。通常終了時は変換を�
 
 HMD の登録と `GetComponent` を観測し、`IVRDriverDirectModeComponent_009::SubmitLayer` をフックします。補正時はレイヤーをコピーし、両眼の `mHmdPose` を変更します。テクスチャ、depth、projection、bounds、prediction interval は保持します。
 
-設定は SteamVR 起動時に読みます。`driver_flugelkranz` のソース既定値は `loadPriority=100`、`observeFrames=false`、`correctFramePose=false`、`timeBasedFramePose=false` です。実機で改善を確認した設定例は [導入ガイド](../../WINDOWS.md#フレーム姿勢補正の設定) を参照してください。
+設定は SteamVR 起動時に読みます。`driver_flugelkranz` のソース既定値は `loadPriority=100`、`observeFrames=true`、`correctFramePose=true`、`timeBasedFramePose=true` です。実機で改善を確認した設定例は [導入ガイド](../../WINDOWS.md#フレーム姿勢補正の設定) を参照してください。
 
 - `correctFramePose=true`：補正フックを有効にします。
 - `timeBasedFramePose=true`：下記の時刻ベース方式を使用します。`correctFramePose=true` が必要です。
@@ -108,10 +108,10 @@ MSVC x64、Windows SDK、CMake、.NET 10 が必要です。`transform_tests`、`
 
 ## 恒等変換時のパススルー
 
-飛行変換が連続 250 ms 以上ゼロで、最新 HMD サンプルが 50 ms 以内なら、フレーム姿勢を独自予測で置き換えず元のレイヤーをそのまま転送します。リセット直後は遅れた飛行フレームに対応するため補正を継続します。ログの `identityBypass=1` はこのパススルーを示し、未補正エラー数には含めません。OFF は変換を保持するため、OFF だけでこの条件になるとは限りません。この修正によるふらつき改善は実機未確認です。
+飛行変換が連続 250 ms 以上ゼロで、最新 HMD サンプルが 50 ms 以内なら、フレーム姿勢を独自予測で置き換えず元のレイヤーをそのまま転送します。リセット直後は遅れた飛行フレームに対応するため補正を継続します。ログの `identityBypass=1` はこのパススルーを示し、未補正エラー数には含めません。OFF は変換を保持するため、OFF だけでこの条件になるとは限りません。2026-09-14、Quest 2 + Touch / VD でふらつき解消の実機報告を得ています。
 
 ## 保持中の予測を保持する補正
 
 `timeBasedFramePose=true` でも、飛行変換が連続 250 ms 以上一定で最新 HMD サンプルが 50 ms 以内なら、両眼のフレーム姿勢へ一定の飛行変換の逆変換だけを適用します。元の SteamVR / HMD ドライバーの予測姿勢を保持し、独自の物理姿勢予測で置き換えません。変換の変更・追跡中断後は条件が揃うまで時刻ベース方式を使用します。恒等変換時の完全なパススルーは引き続き優先します。
 
-`FrameAudit` の `timed` は設定値ではなく、そのレイヤーで実際に時刻ベース方式を試みたかを示します。保持中の逆変換では `timed=0`、`corrected=1` となり `held` の件数が増えます。更新中のフレームと飛行指令を厳密に対応付ける方式は未実装です。保持中の改善効果も実機確認が必要です。
+`FrameAudit` の `timed` は設定値ではなく、そのレイヤーで実際に時刻ベース方式を試みたかを示します。保持中の逆変換では `timed=0`、`corrected=1` となり `held` の件数が増えます。更新中のフレームと飛行指令を厳密に対応付ける方式は未実装です。保持中の改善効果も同構成で実機確認済みです。
