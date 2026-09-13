@@ -10,9 +10,10 @@ public interface IOpenVrSession : IDisposable
     void PreviewStanding(RigidPose standingToRaw);
     void HidePreview();
     string DescribeInput() => "";
+    void OpenBindings() => throw new NotSupportedException();
 }
 
-public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider
+public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider, IFlightBindings
 {
     private readonly IOpenVrSession session;
     private readonly RigidPose originalStanding;
@@ -25,8 +26,8 @@ public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
     public RigidPose ReferenceSpaceOffset => expectedStanding;
     public string InputDiagnostics => session.DescribeInput();
 
-    public OpenVrFlightRuntime(Func<ValveIndexInputSettings>? settings = null)
-        : this(new OpenVrSession(settings)) { }
+    public OpenVrFlightRuntime() : this(new OpenVrSession()) { }
+    public void OpenBindings() => session.OpenBindings();
 
     public OpenVrFlightRuntime(IOpenVrSession session)
     {

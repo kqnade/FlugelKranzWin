@@ -1,63 +1,48 @@
 {
-  "description": "FlugelKranz default controls",
   "controller_type": "knuckles",
-  "name": "FlugelKranz",
+  "name": "FlugelKranz explicit buttons",
   "bindings": {
     "/actions/flight": {
       "sources": [
         {
-          "path": "/user/hand/left/input/trackpad",
-          "mode": "trackpad",
+          "path": "/user/hand/left/input/trigger",
+          "mode": "button",
           "inputs": {
-            "touch": {
-              "output": "/actions/flight/in/left_touch"
-            },
-            "position": {
-              "output": "/actions/flight/in/left_trackpad"
+            "click": {
+              "output": "/actions/flight/in/left_drag"
             }
           }
         },
         {
-          "path": "/user/hand/left/input/trackpad",
-          "mode": "force_sensor",
+          "path": "/user/hand/left/input/a",
+          "mode": "button",
           "inputs": {
-            "force": {
-              "output": "/actions/flight/in/left_force"
+            "click": {
+              "output": "/actions/flight/in/left_turn"
             }
           }
         },
         {
-          "path": "/user/hand/right/input/trackpad",
-          "mode": "trackpad",
+          "path": "/user/hand/right/input/trigger",
+          "mode": "button",
           "inputs": {
-            "touch": {
-              "output": "/actions/flight/in/right_touch"
-            },
-            "position": {
-              "output": "/actions/flight/in/right_trackpad"
+            "click": {
+              "output": "/actions/flight/in/right_drag"
             }
           }
         },
         {
-          "path": "/user/hand/right/input/trackpad",
-          "mode": "force_sensor",
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
           "inputs": {
-            "force": {
-              "output": "/actions/flight/in/right_force"
+            "click": {
+              "output": "/actions/flight/in/right_turn"
             }
           }
-        }
-      ],
-      "poses": [
-        {
-          "output": "/actions/flight/in/left_pose",
-          "path": "/user/hand/left/pose/raw"
-        },
-        {
-          "output": "/actions/flight/in/right_pose",
-          "path": "/user/hand/right/pose/raw"
         }
       ]
     }
-  }
+  },
+  "app_key": "org.flugelkranz.windows",
+  "description": "Hold grip (Touch) or trigger (Index) to drag; hold X/A to turn. Customize in SteamVR."
 }

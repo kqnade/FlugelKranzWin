@@ -8,6 +8,18 @@ namespace FlugelKranz.Tests;
 public class FlightControllerTests
 {
     [Fact]
+    public async Task BindingEditorCanOpenWhileMovementStaysOff()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress);
+        controller.OpenBindings();
+        await Wait(() => runtime.BindingsOpened > 0);
+        Assert.DoesNotContain(progress.Statuses, s => s.Enabled);
+        Assert.Equal(RigidPose.Identity, runtime.CurrentOffset);
+    }
+
+    [Fact]
     public async Task DisposeFailureReportsOffAndAllowsControllerShutdown()
     {
         var runtime = new FakeRuntime { ThrowOnDispose = true };
@@ -262,7 +274,7 @@ public class FlightControllerTests
         public ConcurrentQueue<FlightStatus> Statuses { get; } = new();
         public void Report(FlightStatus value) => Statuses.Enqueue(value);
     }
-    private sealed class FakeRuntime : IFlightRuntime
+    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings
     {
         private readonly object gate = new();
         private InputFrame frame = FlightControllerTests.Frame(0, 0);
@@ -273,6 +285,8 @@ public class FlightControllerTests
         public RigidPose CurrentOffset { get { lock (gate) return offset; } }
         public volatile bool Disposed, ThrowOnRead, ThrowOnDispose;
         public int Restores;
+        public int BindingsOpened;
+        public void OpenBindings() => Interlocked.Increment(ref BindingsOpened);
         private int reads;
         public InputFrame ReadPhysical()
         {

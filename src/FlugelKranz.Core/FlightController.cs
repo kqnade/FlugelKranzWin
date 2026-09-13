@@ -17,6 +17,11 @@ public interface IReferenceSpaceOffsetProvider
     RigidPose ReferenceSpaceOffset { get; }
 }
 
+public interface IFlightBindings
+{
+    void OpenBindings();
+}
+
 public sealed record FlightStatus(
     bool Enabled,
     bool Connected,
@@ -39,6 +44,7 @@ public sealed class FlightController(
     private readonly CancellationTokenSource shutdown = new();
     private Task? worker;
     private bool enabled, resetRequested, disposed;
+    private bool bindingsRequested;
     private long releaseVersion;
 
     public void SetEnabled(bool value)
@@ -59,6 +65,16 @@ public sealed class FlightController(
             ObjectDisposedException.ThrowIf(disposed, this);
             releaseVersion++;
             resetRequested = true;
+        }
+    }
+
+    public void OpenBindings()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            bindingsRequested = true;
+            if (worker is null || worker.IsCompleted) worker = Task.Run(RunAsync);
         }
     }
 
@@ -130,6 +146,13 @@ public sealed class FlightController(
                 }
                 lock (gate)
                 {
+                    if (bindingsRequested)
+                    {
+                        bindingsRequested = false;
+                        if (runtime is not IFlightBindings bindings)
+                            throw new NotSupportedException("このランタイムはバインド設定に対応していません。");
+                        bindings.OpenBindings();
+                    }
                     if (observedVersion != releaseVersion)
                     {
                         freeFlight.Release();
@@ -297,6 +320,7 @@ public sealed class FlightController(
             {
                 enabled = false;
                 resetRequested = false;
+                bindingsRequested = false;
                 worker = null;
                 if (error is not null) Console.Error.WriteLine(error);
                 progress.Report(new(

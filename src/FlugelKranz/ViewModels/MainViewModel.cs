@@ -142,7 +142,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         controller = new(
             () => runtimeFactory is not null ? runtimeFactory(CreateValveIndexSettings)
                 : OperatingSystem.IsWindows()
-                ? new OpenVrFlightRuntime(CreateValveIndexSettings)
+                ? new OpenVrFlightRuntime()
                 : new MonadoFlightRuntime(libraryPath, CreateValveIndexSettings),
             new UiProgress(Update),
             CreateSettings);
@@ -240,6 +240,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand] private void ResetValveIndexPositionDeadZone() => ValveIndexPositionDeadZone = ValveIndexInputSettings.Default.PositionDeadZone;
     [RelayCommand] private void ResetValveIndexForceThreshold() => ValveIndexForceThreshold = Math.Round(ValveIndexInputSettings.Default.ForceThreshold, 6);
     [RelayCommand] private void ResetMode() => Mode = FlightMode.InfiniteWalking;
+    public bool SupportsSteamVrBindings => OperatingSystem.IsWindows();
+    [RelayCommand] private void OpenSteamVrBindings() => controller.OpenBindings();
 
     [RelayCommand]
     private void ToggleMode()

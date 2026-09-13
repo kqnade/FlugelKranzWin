@@ -1,0 +1,10 @@
+{
+  "applications": [{
+    "app_key": "org.flugelkranz.windows",
+    "launch_type": "binary",
+    "binary_path_windows": "FlugelKranz.exe",
+    "is_dashboard_overlay": true,
+    "action_manifest_path": "Actions/actions.json",
+    "strings": { "en_us": { "name": "FlugelKranz", "description": "Free flight and infinite walking" } }
+  }]
+}

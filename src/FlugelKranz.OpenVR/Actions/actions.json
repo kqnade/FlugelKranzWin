@@ -1,74 +1,56 @@
 {
-  "actions": [
+  "localization": [
     {
-      "requirement": "optional",
-      "name": "/actions/flight/in/left_pose",
-      "type": "pose"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/left_trackpad",
-      "type": "vector2"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/left_force",
-      "type": "vector1"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/left_touch",
-      "type": "boolean"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/left_thumbrest",
-      "type": "boolean"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/left_trigger",
-      "type": "boolean"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/right_pose",
-      "type": "pose"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/right_trackpad",
-      "type": "vector2"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/right_force",
-      "type": "vector1"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/right_touch",
-      "type": "boolean"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/right_thumbrest",
-      "type": "boolean"
-    },
-    {
-      "requirement": "optional",
-      "name": "/actions/flight/in/right_trigger",
-      "type": "boolean"
+      "/actions/flight/in/right_reset_hold": "right reset_hold",
+      "/actions/flight/in/right_turn": "right turn",
+      "/actions/flight/in/right_drag": "right drag",
+      "/actions/flight/in/left_turn": "left turn",
+      "language_tag": "en_US",
+      "/actions/flight/in/left_reset_hold": "left reset_hold",
+      "/actions/flight": "FlugelKranz movement",
+      "/actions/flight/in/left_drag": "left drag"
     }
   ],
   "default_bindings": [
     {
-      "controller_type": "knuckles",
-      "binding_url": "bindings_knuckles.json"
+      "binding_url": "bindings_touch.json",
+      "controller_type": "oculus_touch"
     },
     {
-      "controller_type": "oculus_touch",
-      "binding_url": "bindings_touch.json"
+      "binding_url": "bindings_knuckles.json",
+      "controller_type": "knuckles"
+    }
+  ],
+  "actions": [
+    {
+      "type": "boolean",
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_drag"
+    },
+    {
+      "type": "boolean",
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_turn"
+    },
+    {
+      "type": "boolean",
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_reset_hold"
+    },
+    {
+      "type": "boolean",
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_drag"
+    },
+    {
+      "type": "boolean",
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_turn"
+    },
+    {
+      "type": "boolean",
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_reset_hold"
     }
   ],
   "action_sets": [

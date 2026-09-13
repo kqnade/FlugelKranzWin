@@ -28,16 +28,30 @@ dotnet publish src/FlugelKranz -c Release -r win-x64 --self-contained true -o ar
 ```
 
 出力フォルダー全体を配布します。`FlugelKranz.exe`、`openvr_api.dll`、`Actions/`、
-`LICENSE-OpenVR` を一緒に配置してください。GPL-3.0 の本体ソースも提供してください。
+`manifest.vrmanifest`、`LICENSE-OpenVR` を一緒に配置してください。GPL-3.0 の本体ソースも提供してください。
 設定保存先は既存仕様の `%USERPROFILE%/.config/FlugelKranz/config.json` です。
 `FLUGELKRANZ_CONFIG` と `XDG_CONFIG_HOME` による上書きも維持しています。
 
 ## 入力と空間
 
 既定バインディングは Valve Index (`knuckles`) と Touch (`oculus_touch`) 用です。
-README の Drag / Turn / D-pad 操作を共有の `ControllerInputMapping` で変換します。
-SteamVR Input の有効状態を確認し、未割当の Force を押下として扱いません。
-他のコントローラーにはバインディングの追加が必要です。
+Windows 版は左右の Drag / Turn / reset_hold を SteamVR の boolean action として公開します。
+Linux のタッチ組み合わせ判定は使用しません。
+Touch は左右グリップ押下が Drag、左 X / 右 A 押下が Turn です。
+Index は左右トリガー押下が Drag、左右 A 押下が Turn です。タッチだけでは動きません。
+reset_hold は既定で未割当です。割り当てると片手1秒保持でモード別リセット、
+両手1秒保持でモード切替になります。
+
+⚙ →「SteamVR のバインド設定を開く」で編集できます（OFF のままで可）。
+または `FlugelKranz.exe --bindings` を実行します。SteamVR には固定キー
+`org.flugelkranz.windows`、名前 `FlugelKranz` で登録されます。
+SteamVR のコントローラーバインド一覧でもこの名前を選び、Drag / Turn を好きな
+ボタンのクリックやタッチに割り当てられます。旧版の `system.generated.flugelkranz.exe`
+とは別登録です。SteamVR 自動起動設定は追加しません。
+
+HMD と両手は1回の `GetDeviceToAbsoluteTrackingPose(RawAndUncalibrated)` の配列から
+読みます。旧版の HMD は IVRSystem、両手は pose action という入力取得の混在を解消しました。
+I モードで報告されたジッターに対する修正候補です。実機での解消は再確認が必要です。
 
 物理座標 P は接続時の Standing 空間です。OpenVR raw pose を R とし、
 接続時の Standing→Raw を S0 とすると P = S0⁻¹ R です。
@@ -76,7 +90,7 @@ Chaperone 方式でピッチ・ロールがゲームへ正しく反映されな�
 この移植はビルドと自動テストだけで完成判定しません。SteamVR / VRChat で次を確認します。
 
 1. `--diagnose` で HMD・両手が検出されること。
-2. Index の左右 Force / D-pad、Touch の thumb rest + trigger touch が仕様通り動くこと。
+2. SteamVR で設定した Drag / Turn / reset_hold が仕様通り動くこと。
 3. 無限歩行の高さ・Yaw、自由飛行の XYZ 移動と Yaw / Pitch / Roll が反映されること。
 4. 片手・両手の切替、慣性、モード変更、HMD / コントローラー追跡喪失と復帰。
 5. FBT 使用時に HMD・両手・全トラッカーが同じ変換を受けること。

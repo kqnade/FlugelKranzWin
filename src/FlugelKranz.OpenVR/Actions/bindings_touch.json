@@ -1,57 +1,48 @@
 {
-  "description": "FlugelKranz default controls",
   "controller_type": "oculus_touch",
-  "name": "FlugelKranz",
+  "name": "FlugelKranz explicit buttons",
   "bindings": {
     "/actions/flight": {
       "sources": [
         {
-          "path": "/user/hand/left/input/thumbrest",
+          "path": "/user/hand/left/input/grip",
           "mode": "button",
           "inputs": {
-            "touch": {
-              "output": "/actions/flight/in/left_thumbrest"
+            "click": {
+              "output": "/actions/flight/in/left_drag"
             }
           }
         },
         {
-          "path": "/user/hand/left/input/trigger",
+          "path": "/user/hand/left/input/x",
           "mode": "button",
           "inputs": {
-            "touch": {
-              "output": "/actions/flight/in/left_trigger"
+            "click": {
+              "output": "/actions/flight/in/left_turn"
             }
           }
         },
         {
-          "path": "/user/hand/right/input/thumbrest",
+          "path": "/user/hand/right/input/grip",
           "mode": "button",
           "inputs": {
-            "touch": {
-              "output": "/actions/flight/in/right_thumbrest"
+            "click": {
+              "output": "/actions/flight/in/right_drag"
             }
           }
         },
         {
-          "path": "/user/hand/right/input/trigger",
+          "path": "/user/hand/right/input/a",
           "mode": "button",
           "inputs": {
-            "touch": {
-              "output": "/actions/flight/in/right_trigger"
+            "click": {
+              "output": "/actions/flight/in/right_turn"
             }
           }
-        }
-      ],
-      "poses": [
-        {
-          "output": "/actions/flight/in/left_pose",
-          "path": "/user/hand/left/pose/raw"
-        },
-        {
-          "output": "/actions/flight/in/right_pose",
-          "path": "/user/hand/right/pose/raw"
         }
       ]
     }
-  }
+  },
+  "app_key": "org.flugelkranz.windows",
+  "description": "Hold grip (Touch) or trigger (Index) to drag; hold X/A to turn. Customize in SteamVR."
 }

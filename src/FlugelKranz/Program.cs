@@ -31,22 +31,33 @@ internal static class Program
             Description = "UI を開かず接続・入力を確認（空間の書き込みなし）"
         };
         var root = new RootCommand("FlugelKranz — 自由飛行 / 無限歩行。Windows x64 + SteamVR / Linux Wayland + Monado。");
+        var bindingsOption = new Option<bool>("--bindings")
+        {
+            Description = "SteamVR のコントローラーバインド設定を開く（空間の書き込みなし）"
+        };
+        root.Options.Add(bindingsOption);
         root.Options.Add(libraryOption);
         root.Options.Add(diagnoseOption);
         root.SetAction(result =>
         {
             MonadoLibraryPath = result.GetValue(libraryOption)!;
-            return Run(result.GetValue(diagnoseOption));
+            return Run(result.GetValue(diagnoseOption), result.GetValue(bindingsOption));
         });
 
         // Keep Avalonia startup on the entry thread by invoking the action synchronously.
         return root.Parse(args).Invoke();
     }
 
-    private static int Run(bool diagnose)
+    private static int Run(bool diagnose, bool bindings)
     {
         try
         {
+            if (bindings)
+            {
+                using var runtime = new OpenVrFlightRuntime();
+                runtime.OpenBindings();
+                return 0;
+            }
             if (diagnose)
             {
                 using IFlightRuntime runtime = OperatingSystem.IsWindows()
