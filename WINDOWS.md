@@ -75,7 +75,7 @@ cd artifacts/windows-x64
 
 ## 操作・設定・診断
 
-アプリは OFF で起動します。`I` は無限歩行、`F` は自由飛行です。Touch はグリップ押下が Drag、左 X / 右 A 押下が Turn です。OFF は操作と慣性を止めて現在の変換を保持し、`↻` は変換をリセットします。詳しい片手・両手操作と慣性設定は [README](README.md#操作仕様) を参照してください。
+アプリは OFF で起動します。`I` は無限歩行、`F` は自由飛行です。Touch はグリップ押下が Drag、左 X / 右 A 押下が Turn です。OFF は飛行と慣性を止めます。F モードで Drag が有効なら、OFF 中も掴んで移動できます（解放慣性なし）。Drag も無効なら現在の変換を保持します。`↻` は変換をリセットします。詳しい片手・両手操作と慣性設定は [README](README.md#操作仕様) を参照してください。
 
 ```powershell
 ./FlugelKranz.exe --help
@@ -109,7 +109,7 @@ SteamVR MirrorView は正常に見えていても、HMD 内の表示とは一致
 | 回転で黒い縁・暗転・ふらつき | 補正設定とログ、回転保持中か更新中か、頭部運動の有無、HMD 内と MirrorView の違い |
 | 基準空間の変更で停止する | 接続後の Standing 原点変更や他の空間操作ツールの動作。再接続前に状態を確認 |
 
-SteamVR の `logs/vrserver.txt` にフックと `FrameAudit` のログが出ます。通常のインストール先では `C:/Program Files (x86)/Steam/logs/vrserver.txt` です。`history-matched pose correction installed` は補正フックの導入、`timed=1` は時刻ベース補正の使用を示します。`XYZ body-pose transforms v2` という起動ログだけでは補正の有効化は判断できません。
+SteamVR の `logs/vrserver.txt` にフックと `FrameAudit` のログが出ます。通常のインストール先では `C:/Program Files (x86)/Steam/logs/vrserver.txt` です。`history-matched pose correction installed` は補正フックの導入、`timed=1` はそのレイヤーで時刻ベース補正を試みたことを示します。変換保持中は一定の逆変換だけを適用するため `timed=0`・`corrected=1` となり、`held` の件数が増えます。`XYZ body-pose transforms v2` という起動ログだけでは補正の有効化は判断できません。
 
 ## 開発と自動テスト
 
@@ -125,3 +125,19 @@ ctest --test-dir artifacts/driver-build -C Release --output-on-failure
 C# テストは入力、座標合成、慣性、モード切替、追跡喪失、復元、設定、UI を検証します。ネイティブテストは姿勢・速度の変換、恒等変換時のパススルー、レイヤー情報の保持、フレーム姿勢の補間・予測を検証します。自動テストの成功と実機での表示品質は区別してください。
 
 Windows UI は `UseWin32()`、入力と接続は `FlugelKranz.OpenVR`、操作計算は `FlugelKranz.Core`、姿勢適用とフレーム補正は `native/driver` が担当します。上流由来の OpenXR / Monado プロジェクトは依存関係・参照用として残っていますが、ここで Linux の導入・開発を扱うものではありません。
+
+## 頭部操縦試作の実行
+
+`feat/head-steered-flight` の試作アプリは既存の登録済みドライバーへ接続します。DLL は変更しません。別フォルダーへのアプリ発行は次のコマンドです。
+
+```powershell
+dotnet publish src/FlugelKranz -c Release -r win-x64 --self-contained true -o artifacts/head-pilot-windows-x64
+```
+
+通常版の FlugelKranz を終了してから、このフォルダーのアプリを起動します。同じアプリキーを使うため、SteamVR のアクション manifest 登録は最後に起動した版のパスになります。通常版へ戻す場合は通常版を起動し直してください。
+
+SteamVR 開発者設定の `Experimental overlay input overrides` を有効にし、アプリの F モード設定で頭部操縦を有効にします。プログラムはこのグローバル設定を自動変更しません。入力が待機したままの場合は `/actions/pilot` の左スティック推進と X / A 切替の割当を確認してください。操作仕様と未確認事項は [README](README.md#頭部操縦の試作windows--f-モード) を参照してください。
+
+### VRChat 起動時の入力診断
+
+SteamVR の待機空間では移動できる一方、VRChat 内では動かないという報告があり、原因は調査中です。設定画面の入力診断には `requested`、`priority`、`dashboard`、`suspended`、`neutral`、`stickActive`、`y`、X/A の有効・押下状態、`scenePid` を表示します。SteamVR 待機空間と VRChat 内で比較し、送信中のオフセットも併せて確認してください。診断表示は姿勢変換や入力優先度を変更しません。

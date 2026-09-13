@@ -15,6 +15,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private CancellationTokenSource? settingsAnimation;
     private double settingsPanelTargetWidth = 430;
     private bool closing;
+    private readonly bool enableIndependentDrag;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ToggleLabel))]
     private bool isEnabled;
@@ -22,6 +23,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private double settingsPanelWidth;
     [ObservableProperty] private bool isConnected;
     [ObservableProperty] private string status = "オフ — オンにするとランタイムへ接続します。";
+    [ObservableProperty] private string inputDiagnostics = "";
     [ObservableProperty] private string leftStatus = "左右の操作入力から Drag";
     [ObservableProperty] private string rightStatus = "左右の操作入力から Turn";
     [ObservableProperty] private string referenceSpaceOffsetStatus = "送信中の STAGE オフセット: 未接続";
@@ -29,6 +31,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(ModeLabel))]
     [NotifyPropertyChangedFor(nameof(ModeDescription))]
     private FlightMode mode = FlightMode.InfiniteWalking;
+    [ObservableProperty] private bool headPilotEnabled;
+    [ObservableProperty] private bool dragEnabled;
     [ObservableProperty] private bool useHeadTurnOrigin;
     [ObservableProperty] private bool inertiaCutoffEnabled = true;
     [ObservableProperty]
@@ -134,8 +138,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         $"Valve Index force — 左: {LeftValveIndexForce:0.00} / 右: {RightValveIndexForce:0.00}";
 
     public MainViewModel(string libraryPath, string? settingsPath = null,
-        Func<Func<ValveIndexInputSettings>, IFlightRuntime>? runtimeFactory = null)
+        Func<Func<ValveIndexInputSettings>, IFlightRuntime>? runtimeFactory = null, bool enableIndependentDrag = false)
     {
+        this.enableIndependentDrag = enableIndependentDrag;
         settingsStore = new(settingsPath);
         ApplySettings(settingsStore.Load());
         PropertyChanged += SettingsChanged;
@@ -146,6 +151,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 : new MonadoFlightRuntime(libraryPath, CreateValveIndexSettings),
             new UiProgress(Update),
             CreateSettings);
+        if (enableIndependentDrag && OperatingSystem.IsWindows()) controller.RefreshDragConnection();
         if (runtimeFactory is null && !OperatingSystem.IsWindows() && File.Exists(libraryPath))
         {
             Mode = FlightMode.InfiniteWalking;
@@ -158,7 +164,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void SettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is not (
-            nameof(Mode) or nameof(UseHeadTurnOrigin) or
+            nameof(DragEnabled) or nameof(HeadPilotEnabled) or nameof(Mode) or nameof(UseHeadTurnOrigin) or
             nameof(InertiaCutoffEnabled) or nameof(DragCutoffCentimetresPerSecond) or
             nameof(TurnCutoffDegreesPerSecond) or nameof(DragAccelerationMultiplier) or
             nameof(TurnAccelerationMultiplier) or nameof(ZAccelerationMultiplier) or
@@ -174,6 +180,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             return;
 
         settingsStore.Save(CreateSettings());
+        if (enableIndependentDrag && OperatingSystem.IsWindows() && e.PropertyName is nameof(DragEnabled) or nameof(Mode))
+            controller.RefreshDragConnection();
     }
 
     private void ApplySettings(FlugelKranzSettings root)
@@ -181,6 +189,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         root = root.Normalized();
         Mode = root.Mode;
         var settings = root.FreeFlight;
+        HeadPilotEnabled = settings.HeadPilotEnabled;
+        DragEnabled = settings.DragEnabled;
         UseHeadTurnOrigin = settings.TurnOrigin == TurnOrigin.Head;
         InertiaCutoffEnabled = settings.InertiaCutoffEnabled;
         DragCutoffCentimetresPerSecond = Math.Round(settings.DragCutoffMetresPerSecond * 100, 6);
@@ -214,6 +224,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         apply(FlightMotionSettings.Default);
     }
 
+    [RelayCommand] private void ResetHeadPilot() => HeadPilotEnabled = FlightMotionSettings.Default.HeadPilotEnabled;
+    [RelayCommand] private void ResetDragEnabled() => DragEnabled = FlightMotionSettings.Default.DragEnabled;
     [RelayCommand] private void ResetTurnOrigin() => ResetToDefaults(s => UseHeadTurnOrigin = s.TurnOrigin == TurnOrigin.Head);
     [RelayCommand] private void ResetInertiaCutoffEnabled() => ResetToDefaults(s => InertiaCutoffEnabled = s.InertiaCutoffEnabled);
     [RelayCommand] private void ResetDragCutoff() => ResetToDefaults(s => DragCutoffCentimetresPerSecond = s.DragCutoffMetresPerSecond * 100);
@@ -311,6 +323,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         IsConnected = state.Connected;
         Mode = state.Mode;
         Status = state.Message;
+        InputDiagnostics = state.InputDiagnostics ?? "";
         LeftStatus = state.Dragging ? "Space Drag — 操作中" : "左右の操作入力から Drag";
         RightStatus = state.Turning ? "Space Turn — 操作中" : "左右の操作入力から Turn";
         if (state.ReferenceSpaceOffset is { } referenceSpaceOffset)
@@ -327,6 +340,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         Mode = Mode,
         FreeFlight = new()
         {
+            HeadPilotEnabled = HeadPilotEnabled,
+            DragEnabled = DragEnabled,
             TurnOrigin = UseHeadTurnOrigin ? TurnOrigin.Head : TurnOrigin.TrackedElementsMidpoint,
             InertiaCutoffEnabled = InertiaCutoffEnabled,
             DragCutoffMetresPerSecond = (float)(DragCutoffCentimetresPerSecond / 100),

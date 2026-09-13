@@ -22,6 +22,7 @@ public class FreeFlightManipulatorTests
 
     private static readonly FlightMotionSettings HeadOrigin = new()
     {
+        HeadPilotEnabled = false,
         TurnOrigin = TurnOrigin.Head,
         InertiaCutoffEnabled = false,
         InertiaAccelerationBoostEnabled = false,

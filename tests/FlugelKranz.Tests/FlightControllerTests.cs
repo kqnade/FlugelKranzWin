@@ -8,6 +8,79 @@ namespace FlugelKranz.Tests;
 public class FlightControllerTests
 {
     [Fact]
+    public async Task FlightOffAllowsDragButDoesNotStartReleaseInertiaOrThrust()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, FreeFlightSettings);
+        controller.RefreshDragConnection();
+        await WaitForFrame(runtime, Frame(0,0));
+        await WaitForFrame(runtime, Frame(1,0));
+        await WaitForFrame(runtime, Frame(1,1));
+        await Wait(() => runtime.CurrentOffset.Position.X < -0.9f);
+        await WaitForFrame(runtime, Frame(0,1));
+        var stopped = runtime.CurrentOffset;
+        await WaitForFrame(runtime, Frame(0,2) with { PilotAvailable = true, PilotStick = Vector2.UnitY });
+        await WaitForFrame(runtime, Frame(0,3) with { PilotAvailable = true, PilotStick = Vector2.UnitY });
+        Assert.Equal(stopped,runtime.CurrentOffset);
+        Assert.DoesNotContain(progress.Statuses, s => s.Enabled);
+        Assert.False(runtime.PilotEnabled);
+    }
+
+    [Fact]
+    public async Task DragDisabledAndFlightOffKeepOffsetFixed()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        var settings = FreeFlightSettings() with { FreeFlight = FlightMotionSettings.Default with { DragEnabled = false } };
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.OpenBindings();
+        await WaitForFrame(runtime,Frame(0,0));
+        await WaitForFrame(runtime,Frame(1,0));
+        await WaitForFrame(runtime,Frame(1,2));
+        Assert.Equal(RigidPose.Identity,runtime.CurrentOffset);
+    }
+
+    [Fact]
+    public async Task StatusIncludesRuntimeInputDiagnostics()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress);
+        controller.SetEnabled(true);
+        await Wait(() => progress.Statuses.Any(s => s.InputDiagnostics == "test input snapshot"));
+    }
+
+    [Fact]
+    public async Task DashboardStopsInertiaAndClosingDoesNotRestoreIt()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        var settings = FlugelKranzSettings.Default with
+        {
+            Mode = FlightMode.FreeFlight,
+            FreeFlight = FlightMotionSettings.Default with
+            { HeadPilotEnabled = true, InertiaDecelerationPerSecond = 0, DragSmoothSeconds = 0 }
+        };
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.SetEnabled(true);
+        var neutral = Frame(0,0) with { PilotAvailable = true };
+        await WaitForFrame(runtime, neutral);
+        await WaitForFrame(runtime, neutral with { PilotStick = Vector2.UnitY });
+        await Wait(() => runtime.CurrentOffset.Position.Z < -0.005f);
+        await WaitForFrame(runtime, neutral with { MotionSuspended = true });
+        var stopped = runtime.CurrentOffset;
+        await WaitForFrame(runtime, neutral with { MotionSuspended = true });
+        Assert.Equal(stopped, runtime.CurrentOffset);
+        await WaitForFrame(runtime, neutral);
+        await WaitForFrame(runtime, neutral);
+        Assert.Equal(stopped, runtime.CurrentOffset);
+        Assert.True(runtime.PilotEnabled);
+        controller.SetEnabled(false);
+        await Wait(() => !runtime.PilotEnabled);
+    }
+
+    [Fact]
     public async Task BindingEditorCanOpenWhileMovementStaysOff()
     {
         var runtime = new FakeRuntime();
@@ -274,7 +347,7 @@ public class FlightControllerTests
         public ConcurrentQueue<FlightStatus> Statuses { get; } = new();
         public void Report(FlightStatus value) => Statuses.Enqueue(value);
     }
-    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings
+    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings, IFlightInputControl, IFlightInputDiagnostics
     {
         private readonly object gate = new();
         private InputFrame frame = FlightControllerTests.Frame(0, 0);
@@ -286,6 +359,9 @@ public class FlightControllerTests
         public volatile bool Disposed, ThrowOnRead, ThrowOnDispose;
         public int Restores;
         public int BindingsOpened;
+        public string InputDiagnostics => "test input snapshot";
+        public volatile bool PilotEnabled;
+        public void SetPilotInputEnabled(bool value) => PilotEnabled = value;
         public void OpenBindings() => Interlocked.Increment(ref BindingsOpened);
         private int reads;
         public InputFrame ReadPhysical()

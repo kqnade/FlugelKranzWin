@@ -57,6 +57,15 @@ public:
         lastTick=tick;
         entries[next]={tick,output,transform,original?*original:vr::DriverPose_t{},original!=nullptr};next=(next+1)%entries.size();count=std::min(count+1,entries.size());
     }
+    bool canBypassCorrection(double now) const {
+        // Keep correcting late virtual frames until the supported history window
+        // contains only identity output. Then preserve the HMD driver's prediction.
+        return count && std::isfinite(now) && now>=lastTick && now-lastTick<=50
+            && lastTick-heldSince>=250
+            && heldTransform.x==0 && heldTransform.y==0 && heldTransform.z==0
+            && std::abs(heldTransform.w)==1
+            && heldTransform.px==0 && heldTransform.py==0 && heldTransform.pz==0;
+    }
     PhysicalFrame physicalAt(double now,float prediction) const {
         // SubmitLayer specifies when this frame's HMD pose was predicted to.
         // Use that time to recover the physical pose, independently of flight.
@@ -104,6 +113,16 @@ public:
         }
         auto pose=physical(p);
         return {valid(pose),pose,dt,false};
+    }
+    FrameMatch heldMatch(double now,float prediction,const vr::HmdMatrix34_t& layer) const {
+        if(!count || !std::isfinite(now) || now<lastTick || now-lastTick>50
+            || lastTick-heldSince<250 || !std::isfinite(prediction) || std::abs(prediction)>0.1f) return {};
+        for(const auto& row:layer.m) for(float value:row) if(!std::isfinite(value)) return {};
+        for(int i=0;i<3;i++) for(int j=0;j<3;j++) {
+            double dot=0;for(int k=0;k<3;k++) dot+=layer.m[i][k]*layer.m[j][k];
+            if(std::abs(dot-(i==j?1:0))>0.001) return {};
+        }
+        return {true,heldTransform,0,true};
     }
     FrameMatch match(double now,float prediction,const vr::HmdMatrix34_t& layer) const {
         FrameMatch best;

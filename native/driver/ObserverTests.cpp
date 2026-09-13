@@ -74,5 +74,30 @@ int main() {
     observedSubmit(expectedSelf,eyes);
     require(forwarded==6 && inFlight==0);
     require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
+    // Identity must preserve even a render pose that differs from our own
+    // prediction: forward the exact original pointer and bytes.
+    frameHistory.clear();
+    const double resetNow=frameTimeMs();
+    for(int dt=300;dt>=0;dt-=10) frameHistory.add(resetNow-dt,head,flight::Pose{},&head);
+    expectCopy=false;
+    std::memcpy(expectedCopy,eyes,sizeof(eyes));
+    auto missedBefore=missedLayers.load();
+    observedSubmit(expectedSelf,eyes);
+    require(forwarded==7 && inFlight==0);
+    require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
+    require(missedLayers.load()==missedBefore);
+    // Stable flight keeps the HMD driver's render prediction, even when it
+    // disagrees with the independent physical prediction in our history.
+    frameHistory.clear();
+    head.vecVelocity[0]=5;
+    const double heldNow=frameTimeMs();
+    for(int dt=300;dt>=0;dt-=10) frameHistory.add(heldNow-dt,output,transform,&head);
+    for(int i=0;i<2;i++) expectedCopy[i].mHmdPose=flight::removeTransform(eyes[i].mHmdPose,transform);
+    expectCopy=true;
+    auto heldBefore=heldLayers.load();
+    observedSubmit(expectedSelf,eyes);
+    require(forwarded==8 && inFlight==0);
+    require(heldLayers.load()==heldBefore+1);
+    require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
     std::puts("Observer forwards original layers and ignores unavailable/unsupported interfaces: passed");
 }

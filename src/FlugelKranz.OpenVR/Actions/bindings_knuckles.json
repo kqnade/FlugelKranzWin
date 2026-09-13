@@ -41,8 +41,39 @@
           }
         }
       ]
+    },
+    "/actions/pilot": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/pilot/in/thrust"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/a",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/pilot/in/left_toggle"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/pilot/in/right_toggle"
+            }
+          }
+        }
+      ]
     }
   },
   "app_key": "org.flugelkranz.windows",
-  "description": "Hold grip (Touch) or trigger (Index) to drag; hold X/A to turn. Customize in SteamVR."
+  "description": "Drag: grip (Touch) / trigger (Index). X/A: Turn normally; short press toggles head pilot and long press resets inertia in experimental mode. Left stick Y: thrust."
 }

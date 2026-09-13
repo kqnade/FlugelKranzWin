@@ -10,6 +10,7 @@ public class InertiaTests
     private static readonly RigidPose Head = new(Quaternion.Identity, new(0, 1.7f, 0));
     private static readonly FlightMotionSettings Unfiltered = new()
     {
+        HeadPilotEnabled = false,
         TurnOrigin = TurnOrigin.Head,
         InertiaCutoffEnabled = false,
         InertiaAccelerationBoostEnabled = false,

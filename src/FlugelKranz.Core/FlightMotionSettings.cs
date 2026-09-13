@@ -16,6 +16,8 @@ public sealed record FlightMotionSettings
 {
     public static FlightMotionSettings Default { get; } = new();
 
+    public bool HeadPilotEnabled { get; init; } = true;
+    public bool DragEnabled { get; init; } = true;
     public TurnOrigin TurnOrigin { get; init; } = TurnOrigin.TrackedElementsMidpoint;
     public bool InertiaCutoffEnabled { get; init; } = true;
     public float DragCutoffMetresPerSecond { get; init; } = 0.4f;
