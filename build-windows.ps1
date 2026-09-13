@@ -12,6 +12,7 @@ try {
     New-Item -ItemType Directory -Force (Join-Path $driverPath 'bin/win64') | Out-Null
     Copy-Item -LiteralPath 'artifacts/driver-build/Release/driver_flugelkranz.dll' -Destination (Join-Path $driverPath 'bin/win64')
     Copy-Item -LiteralPath 'native/driver/driver.vrdrivermanifest' -Destination $driverPath
+    Copy-Item -LiteralPath 'native/driver/resources' -Destination $driverPath -Recurse -Force
     Copy-Item -LiteralPath 'native/driver/vendor/openvr/LICENSE' -Destination (Join-Path $driverPath 'LICENSE-OpenVR')
     Copy-Item -LiteralPath 'native/driver/vendor/minhook/LICENSE.txt' -Destination (Join-Path $driverPath 'LICENSE-MinHook.txt')
     Copy-Item -LiteralPath 'install-driver.ps1' -Destination 'artifacts/windows-x64'

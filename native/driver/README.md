@@ -29,6 +29,21 @@ matching layout. One app owns the transform. A missing client heartbeat for 500m
 revokes ownership and restores identity; recovery requires reconnecting. Original
 poses older than 100ms are not considered tracked. Shared-memory access is bounded.
 
+Optional passive frame diagnostics: set `driver_flugelkranz.observeFrames` to true
+in the packaged `resources/settings/default.vrsettings` before restarting SteamVR.
+The packaged load priority is 100 so the observer can see HMD registration before
+the HMD is activated. An existing SteamVR user setting can override these defaults.
+Diagnostics observe HMD GetComponent and DirectMode_009 SubmitLayer, forwarding
+the original arguments unchanged. No correction is applied to render layers.
+`FrameAudit` records at most one layer per second to vrserver.txt, including its
+render pose, prediction interval, current flight command and latest physical HMD
+sample age. These are not synchronized frame-history samples; moving-head results
+cannot alone establish a rendering mismatch. Layer selection is unspecified.
+Compare stationary reset/offset states first. Unsupported Direct Mode versions or
+HMDs registered before this driver will not produce layer records. Forwarding unit
+tests do not establish that the installed VD driver uses this observed interface.
+Set observeFrames back to false and restart to remove these diagnostic hooks.
+
 The server driver modifies every device whose pose update passes through the
 hooked host functions, including HMD, controllers and FBT trackers. Other drivers
 that hook the same functions need separate compatibility testing. No installer

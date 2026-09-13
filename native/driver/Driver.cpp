@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstring>
 #include <new>
+#include <cstdio>
 #include "Transform.h"
 
 namespace {
@@ -22,6 +23,97 @@ struct CallbackScope {
 };
 flight::Pose command;
 uint64_t lastHeartbeat=0;
+// Passive Direct Mode diagnostics. No layer fields or textures are modified.
+using Added=bool(*)(void*,const char*,vr::ETrackedDeviceClass,vr::ITrackedDeviceServerDriver*);
+using Component=void*(*)(void*,const char*);
+using Layer=vr::IVRDriverDirectModeComponent::SubmitLayerPerEye_t;
+using Submit=void(*)(void*,const Layer(&)[2]);
+Added addedOriginal[2]{};
+void* addedTargets[2]{};
+Component componentOriginal=nullptr;
+Submit submitOriginal=nullptr;
+void* componentTarget=nullptr;
+void* submitTarget=nullptr;
+std::mutex observerGate;
+std::atomic<uint64_t> nextFrameLog{0};
+bool observeFrames=false;
+bool observerStopping=false; // protected by observerGate
+
+void observedSubmit(void* self,const Layer(&eyes)[2]) {
+    CallbackScope scope;
+    // Copy metadata before forwarding, but always forward the original array.
+    auto pose=eyes[0].mHmdPose;
+    auto prediction=eyes[0].flHmdPosePredictionTimeInSecondsFromNow;
+    auto now=GetTickCount64();
+    auto next=nextFrameLog.load();
+    bool log=now>=next && nextFrameLog.compare_exchange_strong(next,now+1000);
+    flight::Pose sampledCommand,head;
+    uint64_t headTime=0;
+    bool sampled=false;
+    if(log && gate.try_lock()) {
+        sampledCommand=command;
+        auto acquired=state?WaitForSingleObject(ipcMutex,0):WAIT_TIMEOUT;
+        if(acquired==WAIT_OBJECT_0 || acquired==WAIT_ABANDONED) {
+            head=state->samples[0].pose;headTime=state->samples[0].timestamp;
+            ReleaseMutex(ipcMutex);sampled=true;
+        }
+        gate.unlock();
+    }
+    submitOriginal(self,eyes);
+    if(log) {
+        char message[1400];
+        std::snprintf(message,sizeof(message),
+            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f "
+            "layer=[%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f] "
+            "commandQxyzw=[%.6f %.6f %.6f %.6f] commandP=[%.6f %.6f %.6f] "
+            "physicalQxyzw=[%.6f %.6f %.6f %.6f] physicalP=[%.6f %.6f %.6f]",
+            static_cast<unsigned long long>(now),sampled?1:0,
+            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,
+            pose.m[0][0],pose.m[0][1],pose.m[0][2],pose.m[0][3],
+            pose.m[1][0],pose.m[1][1],pose.m[1][2],pose.m[1][3],
+            pose.m[2][0],pose.m[2][1],pose.m[2][2],pose.m[2][3],
+            sampledCommand.x,sampledCommand.y,sampledCommand.z,sampledCommand.w,
+            sampledCommand.px,sampledCommand.py,sampledCommand.pz,
+            head.x,head.y,head.z,head.w,head.px,head.py,head.pz);
+        vr::VRDriverLog()->Log(message);
+    }
+}
+
+void* observedComponent(void* self,const char* name) {
+    CallbackScope scope;
+    auto result=componentOriginal(self,name);
+    if(!result || !name || std::strcmp(name,vr::IVRDriverDirectModeComponent_Version)!=0) return result;
+    std::lock_guard<std::mutex> lock(observerGate);
+    if(!observerStopping && !submitTarget) {
+        auto target=(*reinterpret_cast<void***>(result))[4];
+        auto status=MH_CreateHook(target,reinterpret_cast<void*>(observedSubmit),reinterpret_cast<void**>(&submitOriginal));
+        if(status==MH_OK) {
+            submitTarget=target;
+            status=MH_EnableHook(target);
+        }
+        vr::VRDriverLog()->Log(status==MH_OK?"FrameAudit: DirectMode_009 SubmitLayer observer installed (no writes)":"FrameAudit: SubmitLayer observer failed");
+    }
+    return result;
+}
+
+bool observedAdded(int index,void* host,const char* serial,vr::ETrackedDeviceClass type,vr::ITrackedDeviceServerDriver* driver) {
+    CallbackScope scope;
+    if(type==vr::TrackedDeviceClass_HMD && driver) {
+        std::lock_guard<std::mutex> lock(observerGate);
+        if(!observerStopping && !componentTarget) {
+            auto target=(*reinterpret_cast<void***>(driver))[3];
+            auto status=MH_CreateHook(target,reinterpret_cast<void*>(observedComponent),reinterpret_cast<void**>(&componentOriginal));
+            if(status==MH_OK) {
+                componentTarget=target;
+                status=MH_EnableHook(target);
+            }
+            vr::VRDriverLog()->Log(status==MH_OK?"FrameAudit: HMD GetComponent observer installed":"FrameAudit: HMD GetComponent observer failed");
+        }
+    }
+    return addedOriginal[index](host,serial,type,driver);
+}
+bool added0(void* h,const char* s,vr::ETrackedDeviceClass c,vr::ITrackedDeviceServerDriver* d) {return observedAdded(0,h,s,c,d);}
+bool added1(void* h,const char* s,vr::ETrackedDeviceClass c,vr::ITrackedDeviceServerDriver* d) {return observedAdded(1,h,s,c,d);}
 
 bool enter() {
     auto result=WaitForSingleObject(ipcMutex,2);
@@ -80,13 +172,24 @@ public:
         auto result=MH_Initialize();
         if(result!=MH_OK) {Cleanup();return vr::VRInitError_Driver_Failed;}
         minHookInitialized=true;
+        observerStopping=false;
+        observeFrames=vr::VRSettings()->GetBool("driver_flugelkranz","observeFrames");
         const char* versions[]={"IVRServerDriverHost_006","IVRServerDriverHost_005"};
         void* detours[]={reinterpret_cast<void*>(updated0),reinterpret_cast<void*>(updated1)};
+        void* addedDetours[]={reinterpret_cast<void*>(added0),reinterpret_cast<void*>(added1)};
         int installed=0;
         for(int i=0;i<2;i++) {
             vr::EVRInitError error=vr::VRInitError_None;
             auto host=context->GetGenericInterface(versions[i],&error);
             if(!host || error!=vr::VRInitError_None) continue;
+            if(observeFrames) {
+                auto addedTarget=(*reinterpret_cast<void***>(host))[0];
+                if(i==0 || addedTarget!=addedTargets[0]) {
+                    if(MH_CreateHook(addedTarget,addedDetours[i],reinterpret_cast<void**>(&addedOriginal[i]))!=MH_OK) {Cleanup();return vr::VRInitError_Driver_Failed;}
+                    addedTargets[i]=addedTarget;
+                    if(MH_EnableHook(addedTarget)!=MH_OK) {Cleanup();return vr::VRInitError_Driver_Failed;}
+                }
+            }
             auto target=(*reinterpret_cast<void***>(host))[1];
             if(i==1 && target==targets[0]) continue;
             if(MH_CreateHook(target,detours[i],reinterpret_cast<void**>(&originals[i]))!=MH_OK) {Cleanup();return vr::VRInitError_Driver_Failed;}
@@ -99,10 +202,22 @@ public:
         return vr::VRInitError_None;
     }
     void Cleanup() override {
+        // Finish any installation before disabling targets. A callback already
+        // inside GetComponent must not install a fresh hook during shutdown.
+        {
+            std::lock_guard<std::mutex> lock(observerGate);
+            observerStopping=true;
+        }
+        for(auto target:addedTargets) if(target) MH_DisableHook(target);
+        if(componentTarget) MH_DisableHook(componentTarget);
+        if(submitTarget) MH_DisableHook(submitTarget);
         for(auto target:targets) if(target) MH_DisableHook(target);
         // A callback may still be executing its original function/trampoline.
         // Stop new detours and let existing callbacks return before freeing it.
         while(inFlight.load()!=0) Sleep(1);
+        for(auto& target:addedTargets) if(target) {MH_RemoveHook(target);target=nullptr;}
+        if(componentTarget) {MH_RemoveHook(componentTarget);componentTarget=nullptr;}
+        if(submitTarget) {MH_RemoveHook(submitTarget);submitTarget=nullptr;}
         for(auto& target:targets) if(target) {MH_RemoveHook(target);target=nullptr;}
         std::lock_guard<std::mutex> lock(gate);
         if(state) {UnmapViewOfFile(state);state=nullptr;}
