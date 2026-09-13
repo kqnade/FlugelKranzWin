@@ -179,7 +179,8 @@ public sealed class FreeFlightManipulator
             if (IsDragging) RebaseDrag(frame);
             return Offset;
         }
-        if (!IsDragging && pilotCommand.Acceleration.LengthSquared() > 0)
+        bool thrusting = !IsDragging && pilotCommand.Acceleration.LengthSquared() > 0;
+        if (thrusting)
         {
             linearInertia += pilotCommand.Acceleration * dt;
             if (linearInertia.Length() > 12) linearInertia = Vector3.Normalize(linearInertia) * 12;
@@ -188,7 +189,7 @@ public sealed class FreeFlightManipulator
         bool angularMotionActive = angularInertia.LengthSquared() > 0;
         bool brakingAngularInertia = IsTurning || dragHands == BothHands;
         var orientationBefore = targetOffset.Orientation;
-        AdvanceFreeInertia(frame, dt, !IsDragging, !brakingAngularInertia, settings);
+        AdvanceFreeInertia(frame, dt, !IsDragging, !brakingAngularInertia, settings, !thrusting);
         if (!IsDragging && settings.HeadPilotEnabled)
         {
             AdvanceTargetRotation(frame, pilotCommand.AngularVelocity, dt, settings with { TurnOrigin = TurnOrigin.Head });
@@ -517,7 +518,8 @@ public sealed class FreeFlightManipulator
         float dt,
         bool move,
         bool turn,
-        FlightMotionSettings settings)
+        FlightMotionSettings settings,
+        bool dampTranslation)
     {
         if (dt <= 0)
             return;
@@ -536,7 +538,7 @@ public sealed class FreeFlightManipulator
             translation += linearInertia * dt;
 
         targetOffset = new(rotation, translation);
-        if (move)
+        if (move && dampTranslation)
             ApplyDeceleration(
                 ref linearInertia,
                 ref linearExemptionSeconds,

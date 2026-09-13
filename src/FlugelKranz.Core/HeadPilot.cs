@@ -59,7 +59,7 @@ public sealed class HeadPilot
         if (magnitude > 0.15f)
         {
             acceleration = Vector3.Transform(new Vector3(0, 0, -MathF.Sign(stick.Y)),
-                offset.Orientation * frame.Head.Orientation) * ((magnitude - 0.15f) / 0.85f * 4);
+                offset.Orientation * frame.Head.Orientation) * ((magnitude - 0.15f) / 0.85f * 14);
         }
         return (angular, acceleration, resetInertia);
     }

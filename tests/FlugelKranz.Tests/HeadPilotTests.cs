@@ -87,7 +87,7 @@ public class HeadPilotTests
         pilot.Read(Frame, RigidPose.Identity, 0.01f);
         var offset = new RigidPose(Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI/2), Vector3.Zero);
         var acceleration = pilot.Read(Frame with { PilotStick = Vector2.UnitY }, offset, 0.01f).Acceleration;
-        Assert.True(Vector3.Distance(new(0,4,0), acceleration) < 0.00001f);
+        Assert.True(Vector3.Distance(new(0,14,0), acceleration) < 0.00001f);
     }
     [Theory]
     [InlineData(0)]
@@ -113,14 +113,14 @@ public class HeadPilotTests
         pilot.Read(Frame with { PilotStick = Vector2.UnitX }, RigidPose.Identity, 0.01f);
         var sideways = pilot.Read(Frame with { PilotStick = Vector2.UnitX }, RigidPose.Identity, 0.01f);
         Assert.Equal(Vector3.Zero, sideways.Acceleration);
-        Assert.True(pilot.Read(Frame with { PilotStick = new(1,1) }, RigidPose.Identity, 0.01f).Acceleration.Z < -3.9f);
+        Assert.True(pilot.Read(Frame with { PilotStick = new(1,1) }, RigidPose.Identity, 0.01f).Acceleration.Z < -13.9f);
     }
     [Fact]
     public void BackwardStickReversesThrust()
     {
         var pilot = new HeadPilot();
         pilot.Read(Frame, RigidPose.Identity, 0.01f);
-        Assert.Equal(new Vector3(0,0,4), pilot.Read(Frame with { PilotStick = -Vector2.UnitY }, RigidPose.Identity, 0.01f).Acceleration);
+        Assert.Equal(new Vector3(0,0,14), pilot.Read(Frame with { PilotStick = -Vector2.UnitY }, RigidPose.Identity, 0.01f).Acceleration);
     }
 
     [Fact]
@@ -185,6 +185,35 @@ public class HeadPilotTests
         Assert.False(first.NearlyEquals(second));
         Assert.True(Vector3.Distance(frame.Head.Position, second.Transform(frame.Head.Position)) < 0.00001f);
         Assert.InRange(2*MathF.Acos(second.Orientation.W),0.31f,0.32f);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(10)]
+    public void FullThrustReachesSpeedCapWithoutNaturalDamping(float damping)
+    {
+        var motion = new FreeFlightManipulator(RigidPose.Identity);
+        var settings = Settings with { InertiaDecelerationPerSecond = damping };
+        motion.Update(Frame,0.01f,settings);
+        var thrust = Frame with { PilotStick = Vector2.UnitY };
+        for(int i=0;i<100;i++) motion.Update(thrust,0.01f,settings);
+        var before = motion.Offset;
+        var after = motion.Update(thrust,0.01f,settings);
+        Assert.InRange(Vector3.Distance(before.Position,after.Position)/0.01f,11.999f,12.001f);
+    }
+
+    [Fact]
+    public void ReleasingThrustResumesConfiguredDamping()
+    {
+        var motion = new FreeFlightManipulator(RigidPose.Identity);
+        var settings = Settings with { InertiaDecelerationPerSecond = 2, DecelerationExemptionEnabled = false };
+        motion.Update(Frame,0.01f,settings);
+        for(int i=0;i<100;i++) motion.Update(Frame with { PilotStick = Vector2.UnitY },0.01f,settings);
+        for(int i=0;i<100;i++) motion.Update(Frame,0.01f,settings);
+        var before = motion.Offset;
+        var after = motion.Update(Frame,0.01f,settings);
+        Assert.InRange(Vector3.Distance(before.Position,after.Position)/0.01f,1.62f,1.63f);
     }
 
     [Fact]
