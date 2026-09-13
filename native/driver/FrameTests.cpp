@@ -43,6 +43,17 @@ int main() {
     predicted.qRotation={std::cos(0.025),0,std::sin(0.025),0};
     check(history.match(1020,0.03f,flight::matrix(flight::physical(predicted))).found,"sample age plus prediction interval accounts for physical motion");
     history.clear();
+    // A held flight transform is identical for every sample in the render
+    // window. Head prediction error must not switch that transform off.
+    for(int i=0;i<=30;i++) history.add(2000+i*10,oldOutput,old);
+    auto turned=p;turned.qRotation={h,h,0,0};
+    auto turnedLayer=flight::matrix(flight::physical(flight::apply(turned,old)));
+    auto held=history.match(2301,0.03f,turnedLayer);
+    check(held.found && held.transform.px==3,"held transform survives physical head prediction mismatch");
+    check(!history.match(2400,0.03f,turnedLayer).found,"held transform requires recent tracking");
+    history.add(2310,flight::apply(p,latest),latest);
+    check(!history.match(2311,0.03f,turnedLayer).found,"command change invalidates held-transform shortcut");
+    history.clear();
     p.poseIsValid=false;history.add(1000,p,{});
     check(!history.match(1010,0,flight::matrix(flight::physical(p))).found,"invalid tracking not used");
     std::puts("Frame inverse, delayed commands, prediction, ambiguity and expiration: passed");

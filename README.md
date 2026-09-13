@@ -1,7 +1,12 @@
 # FlugelKranz
 
-Windows x64 / SteamVR 向けの初期移植を追加しています。起動・制約・実機確認手順は
-[WINDOWS.md](WINDOWS.md) を参照してください。以下は Linux / Monado 版の仕様です。
+Windows x64 / SteamVR版は、専用ドライバーによるXYZ移動・3軸回転とSteamVR Inputに
+対応しています。Quest 2 + Touch / Virtual Desktopでは、フレーム姿勢補正を有効にして
+回転が概ね動作することを実機確認しました。回転保持中に頭を動かすと暗転・ジッターが
+出る問題は残っており、対策を検証中です（2026-09-13）。
+
+導入、必要な補正設定、操作方法、確認済みの範囲は [WINDOWS.md](WINDOWS.md) を
+参照してください。以下は Linux / Monado 版の起動方法と操作仕様です。
 
 Monado / WiVRn と Linux Wayland 環境向けの、自由飛行 / 無限歩行ツールです。
 

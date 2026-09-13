@@ -4,6 +4,18 @@ Windows x64 / SteamVR用の実験段階の移植です。自由飛行・無限�
 FlugelKranzのCoreを使用し、XYZ全3軸の変換は専用SteamVRドライバーで適用します。
 Linux / Monado経路は維持しています。
 
+## 現在の動作状況（2026-09-13）
+
+Quest 2 + Touch / Virtual Desktopで、フレーム姿勢補正を有効にした版の回転は
+「多少のジッターはあるものの概ねよい」と実機報告されています。SteamVR MirrorViewは
+正常に見え、HMD内で回転後に残っていた黒い縁は補正によって概ね改善しました。
+XYZ回転の実装全体を未動作として扱う段階ではありません。
+
+一方、回転オフセットを保持して頭を振ると、暗転・レンダーのずれが出る問題が残ります。
+現行ソースには一定の飛行変換を保持中に補正が外れにくくする対策を追加していますが、
+この対策はまだ実機未確認です。ゲーム別の動作、全軸の系統的な試験、FBTや他機種の
+互換性まで確認済みという意味ではありません。
+
 ## 重要な変更
 
 以前のWindows版はChaperone working-set previewへ全軸回転を書いていましたが、
@@ -33,6 +45,26 @@ cd artifacts/windows-x64
 ./FlugelKranz.exe --diagnose
 ./FlugelKranz.exe
 ```
+
+実機で改善を確認した構成は、ドライバーフォルダー内の
+`driver/flugelkranz/resources/settings/default.vrsettings` で次を有効にしています。
+ソース配布の既定値はfalseなので、再ビルド・再配置後は確認してください。
+
+```json
+{
+  "driver_flugelkranz": {
+    "loadPriority": 100,
+    "observeFrames": true,
+    "correctFramePose": true
+  }
+}
+```
+
+`correctFramePose` が表示補正、`observeFrames` が診断用設定です。両方falseなら
+フレームのフックを追加しません。設定はSteamVR起動時に読みます。SteamVR側に同名の
+ユーザー設定がある場合はそちらが優先されます。DLLの更新はSteamVR終了中に行い、
+配置完了後に起動してください。`XYZ body-pose transforms v2` だけでは補正の有効化を
+判別できません。`history-matched pose correction installed` のログを確認します。
 
 解除する場合は `./install-driver.ps1 -Uninstall` を実行し、SteamVRを再起動します。
 SteamVRのアドオン管理でドライバーを無効化した場合は、ONにしても接続できません。
@@ -70,6 +102,11 @@ HMD・手・トラッカーの元のworld-from-driver変換と飛行変換を、
 Chaperoneは書き換えません。変更前の物理姿勢を共有メモリーへ保存し、
 それをアプリの操作計算へ渡すため、飛行結果を入力へ戻す循環はありません。
 
+描画・配信側では、Direct ModeのSubmitLayerをフックし、画像を変更せず、
+フレームに付くHMD姿勢から飛行変換だけを除きます。ゲーム側の仮想的な頭部姿勢と、
+表示補正で使う物理的な頭部姿勢を区別するための処理です。姿勢フックだけでは
+この表示経路の整合性を満たせませんでした。VD自体の不具合と確認したわけではありません。
+
 接続時のStanding→RawをS、物理姿勢をP=S⁻¹R、Coreの飛行変換をDとすると、
 ドライバーへ渡す変換はT=SDS⁻¹です。ゲーム側の姿勢はS⁻¹TR=DPになります。
 右手系、メートル、Y上、-Z前方です。VRChat内の水平線設定は読み書きしません。
@@ -90,18 +127,14 @@ C#では全軸の座標合成、入力への二重適用防止、復元、接続
 Chaperoneが回転を拒否する場合の明示エラーを検証します。
 C++ではXYZのbody poseへの書き戻し、非可換な回転の合成順序、速度・角速度の
 座標系、頭部補正の保持、恒等変換時の完全なパススルーを検証します。
-以前のChaperone版ではQuest 2 + Touch / Virtual Desktopの入力取得に成功しています。
-初期ドライバーはロード・追跡取得を確認しましたが、回転後に黒い縁が残り、↻で消える
-不具合が報告されました。v2はkawaii move assistとの適用先の違いを修正した検証候補です。
-表示不具合の解消・head calibrationの合成・VRChatでの全軸回転は実機確認が必要です。
-SteamVRログの `XYZ body-pose transforms v2` で新DLLのロードを識別できます。
+実機ではロード・HMD/左右Touchの追跡取得と、HMD姿勢への飛行変換の反映を確認しました。
+静止時には飛行回転39.51°がDirect Modeへ渡るフレーム姿勢にも含まれており、その姿勢と
+飛行変換後の物理姿勢との差は測定で最大約0.052°でした。フレーム姿勢補正の導入後の
+実機結果と残る問題は冒頭の「現在の動作状況」を参照してください。
 
-追加の実測ではMirrorViewは正常という報告があり、静止時の飛行回転39.51°が
-Direct Modeへ渡るフレーム姿勢にも含まれていました。配布ドライバーの
-`resources/settings/default.vrsettings` にある `correctFramePose` は、そのフレーム姿勢から
-飛行変換を除く実験的オプションです（既定false、変更後SteamVR再起動）。
-履歴と予測時刻から対応を推定し、対応が曖昧なら補正しません。画像自体は変更しません。
-HMD表示での効果・操作中の安定性は未検証です。詳細は `native/driver/README.md`。
+変換が変わる間は履歴と予測時刻から対応を推定します。これは厳密なフレームIDによる
+対応ではなく、曖昧なら未補正になるため、表示が揺れる可能性があります。
+一定の変換を保持中の対策とログの読み方は [ドライバー文書](native/driver/README.md) を参照してください。
 
 実機では、最初にOFFのまま診断し、HMD・両手を確認します。その後、小さい移動と
 各軸の回転、ボタン解放、OFF、↻、終了復元を確認します。他のposeフック系ツールとの

@@ -34,21 +34,42 @@ inline vr::HmdMatrix34_t removeTransform(const vr::HmdMatrix34_t& rendered,Pose 
     }
     return result;
 }
-struct FrameMatch {bool found=false;Pose transform;double error=1;};
+struct FrameMatch {bool found=false;Pose transform;double error=1;bool held=false;};
 class FrameHistory {
     struct Entry {double tick=0;vr::DriverPose_t output{};Pose transform;};
     std::array<Entry,128> entries{};
     size_t count=0,next=0;
+    double heldSince=0,lastTick=0;
+    Pose heldTransform;
+    static bool same(Pose a,Pose b) {
+        return a.x==b.x && a.y==b.y && a.z==b.z && a.w==b.w
+            && a.px==b.px && a.py==b.py && a.pz==b.pz;
+    }
 public:
-    void clear() {count=next=0;}
+    void clear() {count=next=0;heldSince=lastTick=0;}
     void add(double tick,const vr::DriverPose_t& output,Pose transform) {
-        if(!output.poseIsValid || !output.deviceIsConnected || !valid(transform)) return;
+        if(!output.poseIsValid || !output.deviceIsConnected || !valid(transform)
+            || !valid(physical(output)) || !std::isfinite(tick)) {clear();return;}
+        if(!count || tick<lastTick || tick-lastTick>100 || !same(transform,heldTransform)) {
+            heldSince=tick;heldTransform=transform;
+        }
+        lastTick=tick;
         entries[next]={tick,output,transform};next=(next+1)%entries.size();count=std::min(count+1,entries.size());
     }
     FrameMatch match(double now,float prediction,const vr::HmdMatrix34_t& layer) const {
         FrameMatch best;
         if(!std::isfinite(prediction) || prediction<0 || prediction>0.1f) return best;
         for(const auto& row:layer.m) for(float value:row) if(!std::isfinite(value)) return best;
+        for(int i=0;i<3;i++) for(int j=0;j<3;j++) {
+            double dot=0;for(int k=0;k<3;k++) dot+=layer.m[i][k]*layer.m[j][k];
+            if(std::abs(dot-(i==j?1:0))>0.001) return best;
+        }
+        // When all output poses across the supported 250ms render window use
+        // exactly the same command, pose prediction is unnecessary for selecting
+        // that command. Preserve correction during rapid physical head motion.
+        // Require continued tracking; a command change/gap restarts the window.
+        if(count && lastTick-heldSince>=250 && now>=lastTick && now-lastTick<=50)
+            return {true,heldTransform,0,true};
         // SubmitLayer does not carry our command ID. Match against predicted
         // output poses, and reject plausible matches with different transforms.
         std::array<FrameMatch,128> candidates{};size_t candidateCount=0;

@@ -38,6 +38,7 @@ void* componentTarget=nullptr;
 void* submitTarget=nullptr;
 std::mutex observerGate;
 std::atomic<uint64_t> nextFrameLog{0};
+std::atomic<uint64_t> submittedLayers{0},missedLayers{0},heldLayers{0};
 bool observeFrames=false;
 bool correctFramePose=false;
 flight::FrameHistory frameHistory;
@@ -82,15 +83,21 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
         for(auto& eye:corrected) eye.mHmdPose=flight::removeTransform(eye.mHmdPose,match.transform);
         submitOriginal(self,corrected);
     } else submitOriginal(self,eyes);
+    submittedLayers.fetch_add(1);
+    if(correctFramePose && !match.found) missedLayers.fetch_add(1);
+    if(match.held && match.found) heldLayers.fetch_add(1);
     if(log) {
         char message[1400];
         std::snprintf(message,sizeof(message),
-            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f "
+            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f layers=%llu missed=%llu held=%llu "
             "layer=[%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f] "
             "commandQxyzw=[%.6f %.6f %.6f %.6f] commandP=[%.6f %.6f %.6f] "
             "physicalQxyzw=[%.6f %.6f %.6f %.6f] physicalP=[%.6f %.6f %.6f]",
             static_cast<unsigned long long>(now),sampled?1:0,
             headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,
+            static_cast<unsigned long long>(submittedLayers.exchange(0)),
+            static_cast<unsigned long long>(missedLayers.exchange(0)),
+            static_cast<unsigned long long>(heldLayers.exchange(0)),
             pose.m[0][0],pose.m[0][1],pose.m[0][2],pose.m[0][3],
             pose.m[1][0],pose.m[1][1],pose.m[1][2],pose.m[1][3],
             pose.m[2][0],pose.m[2][1],pose.m[2][2],pose.m[2][3],
