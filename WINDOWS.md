@@ -137,3 +137,7 @@ dotnet publish src/FlugelKranz -c Release -r win-x64 --self-contained true -o ar
 通常版の FlugelKranz を終了してから、このフォルダーのアプリを起動します。同じアプリキーを使うため、SteamVR のアクション manifest 登録は最後に起動した版のパスになります。通常版へ戻す場合は通常版を起動し直してください。
 
 SteamVR 開発者設定の `Experimental overlay input overrides` を有効にし、アプリの F モード設定で頭部操縦を有効にします。プログラムはこのグローバル設定を自動変更しません。入力が待機したままの場合は `/actions/pilot` の左スティック推進と X / A 切替の割当を確認してください。操作仕様と未確認事項は [README](README.md#頭部操縦の試作windows--f-モード) を参照してください。
+
+### VRChat 起動時の入力診断
+
+SteamVR の待機空間では移動できる一方、VRChat 内では動かないという報告があり、原因は調査中です。設定画面の入力診断には `requested`、`priority`、`dashboard`、`suspended`、`neutral`、`stickActive`、`y`、X/A の有効・押下状態、`scenePid` を表示します。SteamVR 待機空間と VRChat 内で比較し、送信中のオフセットも併せて確認してください。診断表示は姿勢変換や入力優先度を変更しません。

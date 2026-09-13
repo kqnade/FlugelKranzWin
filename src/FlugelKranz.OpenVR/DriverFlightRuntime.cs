@@ -2,7 +2,7 @@ using FlugelKranz.Core;
 
 namespace FlugelKranz.OpenVR;
 
-public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider, IFlightBindings, IFlightInputControl
+public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider, IFlightBindings, IFlightInputControl, IFlightInputDiagnostics
 {
     private readonly IOpenVrSession session;
     private readonly IDriverConnection driver;

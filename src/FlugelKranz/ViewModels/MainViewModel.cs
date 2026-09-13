@@ -22,6 +22,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty] private double settingsPanelWidth;
     [ObservableProperty] private bool isConnected;
     [ObservableProperty] private string status = "オフ — オンにするとランタイムへ接続します。";
+    [ObservableProperty] private string inputDiagnostics = "";
     [ObservableProperty] private string leftStatus = "左右の操作入力から Drag";
     [ObservableProperty] private string rightStatus = "左右の操作入力から Turn";
     [ObservableProperty] private string referenceSpaceOffsetStatus = "送信中の STAGE オフセット: 未接続";
@@ -314,6 +315,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         IsConnected = state.Connected;
         Mode = state.Mode;
         Status = state.Message;
+        InputDiagnostics = state.InputDiagnostics ?? "";
         LeftStatus = state.Dragging ? "Space Drag — 操作中" : "左右の操作入力から Drag";
         RightStatus = state.Turning ? "Space Turn — 操作中" : "左右の操作入力から Turn";
         if (state.ReferenceSpaceOffset is { } referenceSpaceOffset)

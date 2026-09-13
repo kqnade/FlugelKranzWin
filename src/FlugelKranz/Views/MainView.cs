@@ -145,6 +145,7 @@ public sealed class MainView(MainViewModel vm) : ViewBase<MainViewModel>(vm)
             new TextBlock().Text("操作状態").FontWeight(FontWeight.SemiBold),
             new TextBlock().Text(model, x => x.LeftStatus),
             new TextBlock().Text(model, x => x.RightStatus),
+            new TextBlock().Text(model, x => x.InputDiagnostics).TextWrapping(TextWrapping.Wrap),
             new TextBlock().Text(model, x => x.ValveIndexForceStatus)
                 .IsVisible(model, x => x.IsValveIndexDetected),
             Divider(),

@@ -22,6 +22,11 @@ public interface IReferenceSpaceOffsetProvider
     RigidPose ReferenceSpaceOffset { get; }
 }
 
+public interface IFlightInputDiagnostics
+{
+    string InputDiagnostics { get; }
+}
+
 public interface IFlightBindings
 {
     void OpenBindings();
@@ -37,7 +42,8 @@ public sealed record FlightStatus(
     float? LeftTrackpadForce = null,
     float? RightTrackpadForce = null,
     RigidPose? ReferenceSpaceOffset = null,
-    Vector3? RecentReferenceSpaceMovement = null);
+    Vector3? RecentReferenceSpaceMovement = null,
+    string? InputDiagnostics = null);
 
 /// <summary>Owns the runtime on one worker. Off retains the offset; reset restores it without disabling the controller.</summary>
 public sealed class FlightController(
@@ -311,7 +317,8 @@ public sealed class FlightController(
                             TrackpadForce(frame.Left),
                             TrackpadForce(frame.Right),
                             referenceSpaceOffset,
-                            recentReferenceSpaceMovement));
+                            recentReferenceSpaceMovement,
+                            (runtime as IFlightInputDiagnostics)?.InputDiagnostics));
                     }
                 }
                 await Task.Delay(10, shutdown.Token).ConfigureAwait(false);

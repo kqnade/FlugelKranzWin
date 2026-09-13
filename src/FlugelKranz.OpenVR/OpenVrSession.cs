@@ -17,6 +17,7 @@ internal sealed class OpenVrSession : IOpenVrSession
     private readonly PilotInputGate pilotGate = new();
     private bool pilotRequested;
     private InputFrame lastFrame;
+    private string pilotDiagnostics = "";
     private bool disposed;
 
     public OpenVrSession()
@@ -94,6 +95,13 @@ internal sealed class OpenVrSession : IOpenVrSession
             && lastFrame.Left.Turn == 0 && lastFrame.Right.Turn == 0
             && lastFrame.Left.DpadDown == 0 && lastFrame.Right.DpadDown == 0;
         bool suspended = pilotGate.Update(pilotRequested, dashboard, neutral);
+        pilotDiagnostics = $"Pilot requested={pilotRequested} priority=0x{actionSets[1].nPriority:X} " +
+            $"dashboard={dashboard} suspended={suspended} neutral={neutral} " +
+            $"stickActive={thrust.bActive} y={thrust.y:F3} " +
+            $"X(active/pressed)={leftToggle.bActive}/{leftToggle.bState} " +
+            $"A(active/pressed)={rightToggle.bActive}/{rightToggle.bState} " +
+            $"head={tracked} inputAvailable={system.IsInputAvailable()} " +
+            $"scenePid={Vr.Compositor?.GetCurrentSceneFocusProcess()}";
         lastFrame = lastFrame with
         {
             PilotStick = stick, PilotHeld = held,
@@ -139,7 +147,7 @@ internal sealed class OpenVrSession : IOpenVrSession
         system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.LeftHand),
         system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand));
     public void HidePreview() => chaperone.HideWorkingSetPreview();
-    public string DescribeInput() => $"left: Drag={lastFrame.Left.Drag}, Turn={lastFrame.Left.Turn}; right: Drag={lastFrame.Right.Drag}, Turn={lastFrame.Right.Turn}";
+    public string DescribeInput() => $"left: Drag={lastFrame.Left.Drag}, Turn={lastFrame.Left.Turn}; right: Drag={lastFrame.Right.Drag}, Turn={lastFrame.Right.Turn}; {pilotDiagnostics}";
 
     private static void CheckApplication(EVRApplicationError error, string operation)
     {

@@ -8,6 +8,16 @@ namespace FlugelKranz.Tests;
 public class FlightControllerTests
 {
     [Fact]
+    public async Task StatusIncludesRuntimeInputDiagnostics()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress);
+        controller.SetEnabled(true);
+        await Wait(() => progress.Statuses.Any(s => s.InputDiagnostics == "test input snapshot"));
+    }
+
+    [Fact]
     public async Task DashboardStopsInertiaAndClosingDoesNotRestoreIt()
     {
         var runtime = new FakeRuntime();
@@ -303,7 +313,7 @@ public class FlightControllerTests
         public ConcurrentQueue<FlightStatus> Statuses { get; } = new();
         public void Report(FlightStatus value) => Statuses.Enqueue(value);
     }
-    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings, IFlightInputControl
+    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings, IFlightInputControl, IFlightInputDiagnostics
     {
         private readonly object gate = new();
         private InputFrame frame = FlightControllerTests.Frame(0, 0);
@@ -315,6 +325,7 @@ public class FlightControllerTests
         public volatile bool Disposed, ThrowOnRead, ThrowOnDispose;
         public int Restores;
         public int BindingsOpened;
+        public string InputDiagnostics => "test input snapshot";
         public volatile bool PilotEnabled;
         public void SetPilotInputEnabled(bool value) => PilotEnabled = value;
         public void OpenBindings() => Interlocked.Increment(ref BindingsOpened);
