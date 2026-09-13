@@ -1,52 +1,46 @@
-# FlugelKranz Windows / SteamVR driver port
+# FlugelKranzWin：導入・開発ガイド
 
-Windows x64 / SteamVR用の実験段階の移植です。自由飛行・無限歩行・慣性・UIは
-FlugelKranzのCoreを使用し、XYZ全3軸の変換は専用SteamVRドライバーで適用します。
-Linux / Monado経路は維持しています。
+このリポジトリの対象は Windows x64 / SteamVR です。Linux / Monado / WiVRn 版は [親リポジトリ](https://github.com/ReinaS-64892/FlugelKranz) を参照してください。操作と慣性の仕様は [README](README.md) にまとめています。
 
-## 現在の動作状況（2026-09-13）
+## 必要な環境
 
-Quest 2 + Touch / Virtual Desktopで、時刻に基づくフレーム姿勢補正を有効にした
-`5b41cab` の実機確認後、「works perfect」と報告されました。回転保持中に頭を動かす
-場合の暗転に加え、回転キーを押したまま頭も動かす場合のジッターについても、
-今回の再現操作で正常動作を確認した結果です。SteamVR MirrorViewも正常という報告です。
+- Windows x64、SteamVR、SteamVR で追跡できる HMD と左右コントローラー。
+- このリポジトリの専用 SteamVR ドライバー。
+- ビルド時：.NET 10 SDK、MSVC x64 Build Tools、Windows SDK、CMake。
 
-これは上記の機器・設定・操作での実機結果です。ゲーム別の動作、全軸の系統的な試験、
-FBTや他機種、長時間使用の互換性まで確認済みという意味ではありません。
+配布アプリは self-contained のため、実行だけなら .NET SDK の別途導入は不要です。現時点の実機確認構成は Quest 2 + Touch / Virtual Desktop です。
 
-## 重要な変更
+## ビルドと初回導入
 
-以前のWindows版はChaperone working-set previewへ全軸回転を書いていましたが、
-対象SteamVRではYawだけが保持され、Pitch / Rollは破棄されました。
-これを外部変更と誤判定し、OFF・復元失敗・切断失敗が表示される問題がありました。
-プレビューを行わない書き込み・読み戻し試験で、この制約を確認しました。
-この方式はXYZ回転に使用しません。新しいWindows版には下記ドライバーが必要です。
-
-## ビルドと導入
-
-.NET 10 SDK、MSVC x64 Build Tools、Windows SDK、CMakeを使用します。
+リポジトリのルートで実行します。
 
 ```powershell
 ./build-windows.ps1
-# PATHにない場合は -Dotnet PATH -CMake PATH で指定
+# PATH にない場合：
+# ./build-windows.ps1 -Dotnet 'C:/path/to/dotnet.exe' -CMake 'C:/path/to/cmake.exe'
 ```
 
-`artifacts/windows-x64` が単体配布フォルダーです。全体を同じ場所に配置し、
-そのフォルダーの `install-driver.ps1` を実行してSteamVRへ登録します。
-スクリプトはSteamVRのvrpathregで登録するだけで、SteamVRを終了しません。
-登録後にSteamVRを終了して再起動してください。VRChatも再起動が必要になります。
+出力先は `artifacts/windows-x64` です。フォルダー全体を配置し、配置先を決めてから登録してください。アプリ名は `FlugelKranz`、実行ファイルは `FlugelKranz.exe` です。
+
+1. SteamVR を終了します。
+2. 下記のフレーム姿勢補正設定を、配置したドライバーの設定ファイルへ反映します。
+3. 配布フォルダーで登録スクリプトを実行します。
+4. SteamVR を起動し、HMD と両手の追跡を確認します。
+5. 診断後、アプリを起動します。
 
 ```powershell
 cd artifacts/windows-x64
 ./install-driver.ps1
-# SteamVRを再起動してから:
+# 設定と登録を終え、SteamVR を起動してから：
 ./FlugelKranz.exe --diagnose
 ./FlugelKranz.exe
 ```
 
-実機で改善を確認した構成は、ドライバーフォルダー内の
-`driver/flugelkranz/resources/settings/default.vrsettings` で次を有効にしています。
-ソース配布の既定値はfalseなので、再ビルド・再配置後は確認してください。
+登録スクリプトは SteamVR の `vrpathreg` を使用します。SteamVR の終了・再起動や、自動起動設定の追加は行いません。SteamVR のアドオン管理でドライバーを無効化している場合は有効にしてください。
+
+## フレーム姿勢補正の設定
+
+配置先の `driver/flugelkranz/resources/settings/default.vrsettings` を、SteamVR の起動前に設定します。実機で黒い縁・暗転の改善を確認した構成は次のとおりです。
 
 ```json
 {
@@ -59,91 +53,75 @@ cd artifacts/windows-x64
 }
 ```
 
-`correctFramePose` が表示補正、`observeFrames` が診断用設定です。両方falseなら
-フレームのフックを追加しません。設定はSteamVR起動時に読みます。SteamVR側に同名の
-ユーザー設定がある場合はそちらが優先されます。DLLの更新はSteamVR終了中に行い、
-配置完了後に起動してください。`XYZ body-pose transforms v2` だけでは補正の有効化を
-判別できません。`history-matched pose correction installed` のログを確認します。
+**ソースの既定値は、上記 3 つの boolean 設定がすべて false です。** ビルドスクリプトはソースの設定を配布先へコピーするため、再ビルド・更新後にも確認してください。SteamVR に同名のユーザー設定がある場合は、そちらが優先されます。
 
-今回正常動作を確認した `timeBasedFramePose: true` は `correctFramePose: true` と併用します。
-変化中の飛行姿勢を照合する代わりに、フレームの予測時刻に対応する物理HMD姿勢を
-元のドライバー入力から補間・予測します。ソースの既定はfalseなので明示的に有効にします。
-有効時のログは `timed=1` になります。falseへ戻すと従来の履歴照合方式を使います。
+`correctFramePose` は描画・配信に渡す HMD 姿勢の補正を有効にします。`timeBasedFramePose` はフレームの予測時刻に対応する物理姿勢を補間・予測する方式で、`correctFramePose=true` と併用します。`observeFrames` は観測用フックを有効にする設定です。`observeFrames` と `correctFramePose` の両方が false ならフレームのフックを追加しません。
 
-解除する場合は `./install-driver.ps1 -Uninstall` を実行し、SteamVRを再起動します。
-SteamVRのアドオン管理でドライバーを無効化した場合は、ONにしても接続できません。
-アプリはOFFで起動します。SteamVRの自動起動設定は追加しません。
-`--diagnose` は姿勢と論理入力を読み、飛行変換を書き込みません。
-`--lib-monado` はWindowsでは使用しません。
+ゲームに渡す飛行後の頭部姿勢と、表示補正用の物理的な頭部姿勢は異なります。姿勢更新フックだけでは、この表示経路の整合性を満たせませんでした。時刻ベースの補正も現在は実機評価中であり、ふらつきの報告が残っています。
 
-## 操作とバインド
+`timeBasedFramePose=false` は以前の履歴照合方式へ戻します。同時に頭と飛行姿勢が動く場合に補正が外れる問題があった方式です。詳細は [ドライバー文書](native/driver/README.md) を参照してください。
 
-* I: 無限歩行。Y移動とYaw回転。
-* F: 自由飛行。XYZ移動とXYZ全3軸回転。
-* Touch: 左右グリップ押下がDrag、左X / 右A押下がTurn。
-* Index: 左右トリガー押下がDrag、左右A押下がTurn。
-* 押しながら手を動かすと空間を引っ張り、Turnを押して手首を傾けると回転します。
-* 操作を始める前にボタンを一度離します。OFFでは変換を保持し、↻で元へ戻します。
-* reset_holdは既定で未割当。片手1秒保持でモード別リセット、両手1秒保持でモード切替。
+## 更新と登録解除
 
-⚙ →「SteamVR のバインド設定を開く」、または `FlugelKranz.exe --bindings` で
-編集できます。SteamVRのアプリ名は `FlugelKranz`、固定キーは
-`org.flugelkranz.windows` です。左右Drag / Turn / reset_holdを好きなボタンやタッチへ
-割り当てられます。Linux用のタッチ組み合わせ・Index感圧設定はWindowsでは使用しません。
+更新時は FlugelKranz と SteamVR を終了し、DLL が使用されていない状態でビルド・配置します。配布フォルダー全体と補正設定を確認してから SteamVR、ゲーム、FlugelKranz を起動してください。配置先を移動した場合は、旧配置の登録を解除して新しい配置を登録します。
 
-## 実装
-
-* [FlugelKranz](https://github.com/ReinaS-64892/FlugelKranz): 操作仕様、Core、Avalonia UI。
-* [OVR Advanced Settings](https://github.com/OpenVR-Advanced-Settings/OpenVR-AdvancedSettings):
-  SteamVR Input、空間操作、Chaperoneの参照。旧Chaperoneバックエンドは互換性検証用に残します。
-* [Kawaii Move Assist](https://github.com/ReinaS-64892/reina_s_kawaii_move_assist):
-  ドライバーのpose-updateフック方式を参照。固定X+5mの試作ドライバーそのものは導入しません。
-
-新しいドライバーはIVRServerDriverHost_005 / _006のpose updateへフックし、
-HMD・手・トラッカーの元のworld-from-driver変換と飛行変換を、位置・向きへ合成して
-書き戻します。world-from-driverは恒等変換にし、速度・角速度も同じ座標系へ回転します。
-↻で恒等変換へ戻した場合は、元のドライバー姿勢をそのまま通します。
-Chaperoneは書き換えません。変更前の物理姿勢を共有メモリーへ保存し、
-それをアプリの操作計算へ渡すため、飛行結果を入力へ戻す循環はありません。
-
-描画・配信側では、Direct ModeのSubmitLayerをフックし、画像を変更せず、
-フレームに付くHMD姿勢から飛行変換だけを除きます。ゲーム側の仮想的な頭部姿勢と、
-表示補正で使う物理的な頭部姿勢を区別するための処理です。姿勢フックだけでは
-この表示経路の整合性を満たせませんでした。VD自体の不具合と確認したわけではありません。
-
-接続時のStanding→RawをS、物理姿勢をP=S⁻¹R、Coreの飛行変換をDとすると、
-ドライバーへ渡す変換はT=SDS⁻¹です。ゲーム側の姿勢はS⁻¹TR=DPになります。
-右手系、メートル、Y上、-Z前方です。VRChat内の水平線設定は読み書きしません。
-
-ドライバーはアプリのheartbeatが500ms途絶えると所有権を解除して恒等変換へ戻します。
-復帰時は再接続が必要です。100msより古い物理姿勢は追跡喪失として扱います。
-OFF中はheartbeatを維持して変換を保持します。通常終了は変換を解除します。
-IPCの詳細・制約は `native/driver/README.md` を参照してください。
-
-## 検証と未確認事項
+登録解除は配布フォルダーで実行します。
 
 ```powershell
+./install-driver.ps1 -Uninstall
+```
+
+解除後は SteamVR を再起動します。スクリプト自身は再起動しません。
+
+## 操作・設定・診断
+
+アプリは OFF で起動します。`I` は無限歩行、`F` は自由飛行です。Touch はグリップ押下が Drag、左 X / 右 A 押下が Turn です。OFF は操作と慣性を止めて現在の変換を保持し、`↻` は変換をリセットします。詳しい片手・両手操作と慣性設定は [README](README.md#操作仕様) を参照してください。
+
+```powershell
+./FlugelKranz.exe --help
+./FlugelKranz.exe --bindings
+./FlugelKranz.exe --diagnose
+```
+
+`--bindings` は SteamVR のバインド設定を開きます。`--diagnose` は UI を開かず、接続・物理姿勢・論理入力を確認します。診断時は別の FlugelKranz を終了し、HMD と左右コントローラーを追跡可能にしてください。入力が揃わない場合は非ゼロで終了します。
+
+設定の保存先は `%USERPROFILE%/.config/FlugelKranz/config.json` です。`FLUGELKRANZ_CONFIG` でファイル、`XDG_CONFIG_HOME` でディレクトリを指定できます。既存の保存値は、アプリの既定値とは別に復元されます。
+
+## 動作確認
+
+2026-09-13、Quest 2 + Touch / Virtual Desktop / SteamVR で、`5b41cab` の時刻ベース補正を有効にして確認しました。
+
+- HMD・左右 Touch の物理姿勢取得と、SteamVR 側への飛行変換の反映を確認。
+- 回転保持中の頭部運動、および回転入力中の頭部運動で、以前の黒い縁・暗転・ジッターが改善したとの報告あり。
+- その後、補正によって視界がふらつき、酔いやすく感じるとの追加報告あり。原因は未確定で、表示品質の問題は解決済みとして扱いません。
+
+SteamVR MirrorView は正常に見えていても、HMD 内の表示とは一致しない場合がありました。検証では HMD 内の見え方も確認してください。ゲーム別、全軸の系統的な試験、他の HMD、FBT、他の姿勢フックツールとの共存、長時間使用は未検証です。
+
+現在の慣性と移動速度についても調整要望があります。OVRAS の慣性ブレーキ 10%・ドラッグ倍率 1.4 倍に近い操作感への変更は未実施で、README の既定値は現行実装の値です。
+
+## 問題の切り分け
+
+| 症状 | 確認する内容 |
+| --- | --- |
+| SteamVR に接続できない | SteamVR の起動、ドライバー登録、アドオンの有効状態、別クライアントの接続 |
+| 両手を取得できない | HMD を装着し、両方のコントローラーが SteamVR で追跡されているか |
+| 入力が反応しない | FlugelKranz の SteamVR バインド、ON 状態、ボタンを離してから押し直したか |
+| 回転で黒い縁・暗転・ふらつき | 補正設定とログ、回転保持中か更新中か、頭部運動の有無、HMD 内と MirrorView の違い |
+| 基準空間の変更で停止する | 接続後の Standing 原点変更や他の空間操作ツールの動作。再接続前に状態を確認 |
+
+SteamVR の `logs/vrserver.txt` にフックと `FrameAudit` のログが出ます。通常のインストール先では `C:/Program Files (x86)/Steam/logs/vrserver.txt` です。`history-matched pose correction installed` は補正フックの導入、`timed=1` は時刻ベース補正の使用を示します。`XYZ body-pose transforms v2` という起動ログだけでは補正の有効化は判断できません。
+
+## 開発と自動テスト
+
+```powershell
+dotnet restore FlugelKranz.slnx
+dotnet build FlugelKranz.slnx
 dotnet test FlugelKranz.slnx
+cmake -S native/driver -B artifacts/driver-build -A x64
+cmake --build artifacts/driver-build --config Release
 ctest --test-dir artifacts/driver-build -C Release --output-on-failure
 ```
 
-C#では全軸の座標合成、入力への二重適用防止、復元、接続失敗、追跡喪失、
-Chaperoneが回転を拒否する場合の明示エラーを検証します。
-C++ではXYZのbody poseへの書き戻し、非可換な回転の合成順序、速度・角速度の
-座標系、頭部補正の保持、恒等変換時の完全なパススルーを検証します。
-実機ではロード・HMD/左右Touchの追跡取得と、HMD姿勢への飛行変換の反映を確認しました。
-静止時には飛行回転39.51°がDirect Modeへ渡るフレーム姿勢にも含まれており、その姿勢と
-飛行変換後の物理姿勢との差は測定で最大約0.052°でした。フレーム姿勢補正の導入後の
-実機結果と残る問題は冒頭の「現在の動作状況」を参照してください。
+C# テストは入力、座標合成、慣性、モード切替、追跡喪失、復元、設定、UI を検証します。ネイティブテストは姿勢・速度の変換、恒等変換時のパススルー、レイヤー情報の保持、フレーム姿勢の補間・予測を検証します。自動テストの成功と実機での表示品質は区別してください。
 
-変換が変わる間は履歴と予測時刻から対応を推定します。これは厳密なフレームIDによる
-対応ではなく、曖昧なら未補正になるため、表示が揺れる可能性があります。
-一定の変換を保持中の対策とログの読み方は [ドライバー文書](native/driver/README.md) を参照してください。
-
-実機では、最初にOFFのまま診断し、HMD・両手を確認します。その後、小さい移動と
-各軸の回転、ボタン解放、OFF、↻、終了復元を確認します。他のposeフック系ツールとの
-共存やFBT全機種は未検証です。問題があればドライバーを解除できます。
-
-設定は `%USERPROFILE%/.config/FlugelKranz/config.json` に保存します。
-`FLUGELKRANZ_CONFIG` と `XDG_CONFIG_HOME` で変更できます。
-配布時は本体GPL-3.0ソースと同梱のOpenVR・MinHookライセンスを提供してください。
+Windows UI は `UseWin32()`、入力と接続は `FlugelKranz.OpenVR`、操作計算は `FlugelKranz.Core`、姿勢適用とフレーム補正は `native/driver` が担当します。上流由来の OpenXR / Monado プロジェクトは依存関係・参照用として残っていますが、ここで Linux の導入・開発を扱うものではありません。

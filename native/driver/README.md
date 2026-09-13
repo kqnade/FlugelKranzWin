@@ -1,113 +1,107 @@
-# FlugelKranz SteamVR driver
+# FlugelKranzWin SteamVR driver
 
-Windows x64 server driver. Based on the driver-pose interception approach explored
-by [Kawaii Move Assist](https://github.com/ReinaS-64892/reina_s_kawaii_move_assist).
-This implementation installs MinHook detours on the pose-update entry points of
-IVRServerDriverHost_005 / _006, then bakes the original world-from-driver transform
-and commanded flight transform into `qRotation` and `vecPosition`, following
-Kawaii Move Assist's world-space body-pose representation. World-from-driver is
-then identity. Linear and angular derivatives are rotated into the same space;
-body-local head calibration and pose timing are preserved. Identity commands pass
-the original driver pose through unchanged, including its original calibration.
+Windows x64 用の server driver です。[導入・設定](../../WINDOWS.md) と [操作仕様](../../README.md) はそれぞれの文書を参照してください。この派生リポジトリは Windows / SteamVR を対象とし、Linux 版は [親リポジトリ](https://github.com/ReinaS-64892/FlugelKranz) が扱います。
 
-Hardware status (2026-09-13): after testing commit 5b41cab with correctFramePose=true
-and timeBasedFramePose=true, the Quest 2 + Touch / Virtual Desktop user reported
-"works perfect", including simultaneous flight rotation and head motion. This
-supersedes the earlier jitter/blackout reports for the tested reproduction steps.
-The body-pose change alone was insufficient; the time-based physical frame metadata
-path resolved the reported display issue. MirrorView was already reported normal.
-Other headsets, games and FBT combinations have not been systematically validated.
+## 姿勢の流れ
 
-No Chaperone setters are used. Original device poses are published before the
-flight transform, avoiding transformed-pose feedback into the C# motion engine.
-Device pose snapshots use world-from-driver * body * driver-from-head. This
-calibration composition needs validation beyond the tested headset. Pose hooks and
-the DirectMode_009 SubmitLayer hook have been observed on the installed VD driver;
-unit tests alone do not establish SteamVR compatibility.
+```text
+HMD / controller / tracker の DriverPose_t
+  ├─ 変換前の物理姿勢 → 共有メモリー → C# Core の操作計算
+  └─ 飛行変換を適用 → SteamVR → ゲームの仮想姿勢
 
-IPC: session-local named mapping `FlugelKranz.Driver.State.v1` (4704 bytes), guarded
-by `FlugelKranz.Driver.Mutex.v1`. See `Transform.h` and `DriverConnection.cs` for the
-matching layout. One app owns the transform. A missing client heartbeat for 500ms
-revokes ownership and restores identity; recovery requires reconnecting. Original
-poses older than 100ms are not considered tracked. Shared-memory access is bounded.
+DirectMode_009 SubmitLayer
+  └─ フレーム時刻に対応する物理 HMD 姿勢を mHmdPose へ設定
+       → 画像・投影・予測時間を保持して転送
+```
 
-Optional passive frame diagnostics: set `driver_flugelkranz.observeFrames` to true
-in the packaged `resources/settings/default.vrsettings` before restarting SteamVR.
-The packaged load priority is 100 so the observer can see HMD registration before
-the HMD is activated. An existing SteamVR user setting can override these defaults.
-With correctFramePose=false, diagnostics observe HMD GetComponent and DirectMode_009
-SubmitLayer, forwarding original arguments unchanged. No correction is applied.
-`FrameAudit` records at most one layer per second to vrserver.txt, including its
-render pose, prediction interval, current flight command and latest physical HMD
-sample age. These are not synchronized frame-history samples; moving-head results
-cannot alone establish a rendering mismatch. Layer selection is unspecified.
-Compare stationary reset/offset states first. Unsupported Direct Mode versions or
-HMDs registered before this driver will not produce layer records. Set both
-observeFrames and correctFramePose false and restart to remove these hooks.
+[Kawaii Move Assist](https://github.com/ReinaS-64892/reina_s_kawaii_move_assist) の姿勢更新フック方式を参考に、MinHook で `IVRServerDriverHost_005 / _006::TrackedDevicePoseUpdated` をフックします。元の world-from-driver と飛行変換を `qRotation` / `vecPosition` へ合成し、world-from-driver を恒等変換にします。線速度・角速度なども同じ座標系へ回転し、body-local の頭部校正と姿勢時刻は保持します。
 
-Experimental render-pose correction: `driver_flugelkranz.correctFramePose=true`
-also installs the DirectMode_009 hook. It copies each submitted layer and removes
-the flight transform from both `mHmdPose` matrices; textures, depth, projection,
-bounds and prediction intervals remain unchanged. The option defaults to false.
-This option and timeBasedFramePose were enabled for the successful report above;
-it is not a general compatibility guarantee.
+恒等変換の指令では元の `DriverPose_t` をそのまま転送します。Chaperone setter は呼びません。フックを通る HMD、コントローラー、トラッカーへ変換が作用しますが、他ドライバーとの共存や全機種への対応を意味するものではありません。
 
-Legacy fitting path (timeBasedFramePose=false): the transform is selected from the
-last 128 valid HMD output samples (at most
-250ms old), using a high-resolution receipt timestamp, driver poseTimeOffset,
-linear/angular velocity and SubmitLayer's prediction interval. Predictions beyond
-100ms are rejected. This is a best-fit association, NOT an exact frame ID: the API
-does not supply our command ID and SteamVR's prediction implementation is not
-duplicated exactly. Both eyes must match. Missing/ambiguous matches forward the
-original layer unchanged and appear as `corrected=0` in the rate-limited audit log;
-this may leave intermittent borders during motion. `corrected=1` means a matched
-inverse was applied, not that the HMD displayed it correctly. A full dynamic-motion
-test remains necessary. The Core and the application-visible flight pose are not
-changed by this option. Set both options false and restart to remove the hooks.
+## 座標系
 
-Held-transform correction: after 250ms of continuous valid output samples with an
-exactly unchanged flight transform, the same inverse applies throughout the
-supported history window. This path does not depend on predicting physical head
-motion, so a prediction mismatch no longer disables correction while holding a
-rotation. It requires an HMD sample within 50ms. A transform change, invalid pose,
-or sample gap over 100ms restarts the hold window. Frames delayed beyond the
-supported history window remain outside this model. Hardware feedback confirmed
-improvement for held rotations. Active flight changes
-continue to use the best-fit matcher unless the time-based option below is enabled.
+右手系、メートル、+Y 上、-Z 前方です。積は右側を先に適用します。
 
-`timeBasedFramePose=true` (default false, requires correctFramePose) is the path
-confirmed in the simultaneous head/flight test. It stores the original DriverPose
-beside each transformed output, and computes the physical head pose for
-`SubmitLayer receipt time + flHmdPosePredictionTimeInSecondsFromNow`. Sample time is
-`pose-update receipt time + poseTimeOffset`. Bracketing physical samples use linear
-position interpolation and quaternion SLERP; otherwise linear/angular velocity
-predicts at most 100ms forward or backward. Head/IMU calibration is retained. Fresh
-tracking within 50ms is required. No virtual-pose similarity or flight-command
-selection is involved. It assigns this physical pose to each eye's metadata while
-preserving textures, projection, bounds and prediction times. Logs show `timed=1`,
-`physicalDt` and `matchError=-1` (no pose-fit error exists in this path).
+接続時の Standing → Raw を `S`、Raw 空間の物理姿勢を `R`、Core の飛行変換を `D` とすると、次の関係になります。
 
-This association relies on the documented prediction-time meaning and local
-receipt timestamps. It does not reproduce VD/SteamVR prediction exactly; the
-successful test does not establish accuracy for other hardware. Source defaults
-remain opt-in; setting timeBasedFramePose=false restores the earlier fitting path.
+```text
+Core が読む物理姿勢： P = S⁻¹ R
+ドライバーへの指令： T = S D S⁻¹
+ゲーム側の姿勢：     S⁻¹ T R = D P
+```
 
-Audit records also include `layers`, `missed`, and `held`: counts across submitted
-layers since the preceding record, rather than one sampled success/failure per
-second. Multiple layers can belong to one rendered frame, so these are layer
-counts, not headset frame counts. `held` counts the constant-transform path and
-`missed` counts uncorrected layers while correction is enabled.
+物理姿勢キャッシュは `world-from-driver * body * driver-from-head` で構成します。Core は変換前のキャッシュを読み、飛行結果を入力へ再適用する循環を防ぎます。各デバイスの通知時刻は独立しており、HMD と両手が完全に同時刻のサンプルとは限りません。
 
-The server driver modifies every device whose pose update passes through the
-hooked host functions, including HMD, controllers and FBT trackers. Other drivers
-that hook the same functions need separate compatibility testing. No installer
-restarts SteamVR or writes room setup. Driver registration is per-user through
-SteamVR's `vrpathreg.exe` and can be undone using `install-driver.ps1 -Uninstall`.
+## IPC と接続状態
 
-Vendored files:
+セッションローカルの共有メモリー `Local\FlugelKranz.Driver.State.v1`（4704 bytes、64 device slots）を `Local\FlugelKranz.Driver.Mutex.v1` で保護します。対応するレイアウトは `Transform.h` と `src/FlugelKranz.OpenVR/DriverConnection.cs` にあります。
 
-* OpenVR header and license: ValveSoftware/openvr `0924064316de3effbcd1acf1e309182a2deb1c05`.
-* MinHook source and build files: TsudaKageyu/minhook `8af6b4acae5a9388fd742b56fa79ece89d96f823`.
+変換を所有できるクライアントは 1 つです。heartbeat が 500 ms 途絶えると所有権を解除し、恒等変換へ戻します。復帰には再接続が必要です。C# 側では 100 ms より古い物理姿勢を追跡中と扱いません。
 
-Build with MSVC x64, Windows SDK, CMake, and .NET 10: `./build-windows.ps1`.
-Run native tests: `ctest --test-dir artifacts/driver-build -C Release --output-on-failure`.
+OFF 中も heartbeat と変換を保持します。通常終了時は変換を解除します。SteamVR 自体の停止・異常終了時の復元を保証する仕組みではありません。
+
+## 表示補正
+
+ゲームへ渡す飛行後の HMD 姿勢を、そのまま配信・再投影用の物理姿勢として扱うと、HMD 内に黒い縁や暗転が生じることがありました。MirrorView が正常でも起きたため、姿勢更新とフレームの表示補正を別々に扱います。
+
+HMD の登録と `GetComponent` を観測し、`IVRDriverDirectModeComponent_009::SubmitLayer` をフックします。補正時はレイヤーをコピーし、両眼の `mHmdPose` を変更します。テクスチャ、depth、projection、bounds、prediction interval は保持します。
+
+設定は SteamVR 起動時に読みます。`driver_flugelkranz` のソース既定値は `loadPriority=100`、`observeFrames=false`、`correctFramePose=false`、`timeBasedFramePose=false` です。実機で改善を確認した設定例は [導入ガイド](../../WINDOWS.md#フレーム姿勢補正の設定) を参照してください。
+
+- `correctFramePose=true`：補正フックを有効にします。
+- `timeBasedFramePose=true`：下記の時刻ベース方式を使用します。`correctFramePose=true` が必要です。
+- `observeFrames=true`：補正を無効にした状態でも観測用フックを有効にします。補正無効時は元のレイヤーをそのまま転送します。
+
+`observeFrames` と `correctFramePose` の両方を false にして再起動すると、これらのフレームフックを追加しません。`observeFrames=false` だけでは、補正中のログが無効になるわけではありません。SteamVR の同名ユーザー設定は配布ファイルの既定値より優先されます。
+
+### 時刻ベース方式
+
+128 件の HMD 履歴に、変換後の姿勢と元の `DriverPose_t` を保存します。
+
+```text
+物理サンプルの時刻 = pose-update 受信時刻 + poseTimeOffset
+求めるフレーム時刻 = SubmitLayer 受信時刻
+                     + flHmdPosePredictionTimeInSecondsFromNow
+```
+
+対象時刻を挟む物理サンプルがあれば位置の線形補間と quaternion SLERP を使用します。そうでなければ線速度・角速度で最大 100 ms 前後まで予測します。履歴は受信後 250 ms 以内、補間区間は 100 ms 以内、最新 HMD サンプルは 50 ms 以内を必要とします。頭部 / IMU の校正を保持します。
+
+求めた物理姿勢を各眼のフレーム姿勢へ設定します。飛行後の姿勢との類似度から飛行指令を選ぶ処理には依存しません。ただし、ローカル受信時刻と API の予測時間に基づく推定であり、SteamVR / VD 内部の予測を完全に再現するものではありません。条件を満たさず補正できない場合は元のレイヤーを転送します。
+
+### 以前の履歴照合方式
+
+`timeBasedFramePose=false` では、予測した変換後の HMD 履歴にフレーム姿勢を照合し、一致する飛行変換の逆変換を適用します。対応がない・曖昧な場合は元のレイヤーを転送します。厳密なフレーム ID による対応ではありません。
+
+飛行変換が 250 ms 以上一定で、最新 HMD サンプルが 50 ms 以内なら、一定の逆変換を利用する保持中の経路もあります。変換変更・無効姿勢・100 ms 超のサンプル間隔で保持条件をやり直します。この方式では飛行回転と頭部運動の同時実行で補正が外れる報告があり、時刻ベース方式を追加しました。
+
+## ログと実機確認
+
+`vrserver.txt` の `FrameAudit` は最大毎秒 1 レイヤーを記録します。
+
+| 項目 | 意味 |
+| --- | --- |
+| `corrected=1` | そのレイヤーの姿勢メタデータを補正した。HMD の表示品質の保証ではない |
+| `timed=1` | 時刻ベースの物理姿勢を使用 |
+| `physicalDt` | 物理姿勢の時刻差に関する診断値 |
+| `matchError=-1` | 時刻ベース方式では姿勢照合誤差を計算しない |
+| `layers` / `missed` / `held` | 前の記録以降のレイヤー数 / 未補正数 / 保持中の経路の使用数 |
+
+複数レイヤーが 1 フレームに属する場合があるため、これらを HMD のフレーム数として解釈しないでください。未対応の Direct Mode バージョン、またはフック導入前に登録された HMD では記録されない場合があります。`loadPriority=100` は HMD 登録を早期に観測するための設定です。
+
+2026-09-13、Quest 2 + Touch / VD で時刻ベース方式（`5b41cab`）による黒い縁・暗転・同時回転時のジッター改善の報告を得ました。その後、視界のふらつきと酔いやすさの追加報告があり、原因は未確定です。表示品質の問題は調査継続中です。他の HMD、ゲーム、FBT 構成の系統的な検証は未実施です。
+
+## ビルド・テスト・依存コード
+
+リポジトリのルートから実行します。
+
+```powershell
+./build-windows.ps1
+ctest --test-dir artifacts/driver-build -C Release --output-on-failure
+```
+
+MSVC x64、Windows SDK、CMake、.NET 10 が必要です。`transform_tests`、`observer_tests`、`frame_tests` は座標合成・恒等変換・フレーム情報保持・物理姿勢の補間と予測を検証します。テストだけでは実機のフック互換性や表示品質を確認できません。
+
+同梱コードの出典とライセンスを保持してください。
+
+- OpenVR header / license：ValveSoftware/openvr `0924064316de3effbcd1acf1e309182a2deb1c05`。
+- MinHook source / build files：TsudaKageyu/minhook `8af6b4acae5a9388fd742b56fa79ece89d96f823`。
