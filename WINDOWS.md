@@ -6,16 +6,13 @@ Linux / Monado経路は維持しています。
 
 ## 現在の動作状況（2026-09-13）
 
-Quest 2 + Touch / Virtual Desktopで、フレーム姿勢補正を有効にした版の回転は
-「多少のジッターはあるものの概ねよい」と実機報告されています。SteamVR MirrorViewは
-正常に見え、HMD内で回転後に残っていた黒い縁は補正によって概ね改善しました。
-XYZ回転の実装全体を未動作として扱う段階ではありません。
+Quest 2 + Touch / Virtual Desktopで、時刻に基づくフレーム姿勢補正を有効にした
+`5b41cab` の実機確認後、「works perfect」と報告されました。回転保持中に頭を動かす
+場合の暗転に加え、回転キーを押したまま頭も動かす場合のジッターについても、
+今回の再現操作で正常動作を確認した結果です。SteamVR MirrorViewも正常という報告です。
 
-回転オフセットを保持して頭を振ったときの暗転は、一定変換の補正を維持する対策後に
-改善報告がありました。残る問題は、回転キーを押したまま頭も動かす場合のジッターです。
-フレーム時刻から物理HMD姿勢を求める追加対策は、まだ実機未確認です。
-ゲーム別の動作、全軸の系統的な試験、FBTや他機種の
-互換性まで確認済みという意味ではありません。
+これは上記の機器・設定・操作での実機結果です。ゲーム別の動作、全軸の系統的な試験、
+FBTや他機種、長時間使用の互換性まで確認済みという意味ではありません。
 
 ## 重要な変更
 
@@ -56,7 +53,8 @@ cd artifacts/windows-x64
   "driver_flugelkranz": {
     "loadPriority": 100,
     "observeFrames": true,
-    "correctFramePose": true
+    "correctFramePose": true,
+    "timeBasedFramePose": true
   }
 }
 ```
@@ -67,9 +65,9 @@ cd artifacts/windows-x64
 配置完了後に起動してください。`XYZ body-pose transforms v2` だけでは補正の有効化を
 判別できません。`history-matched pose correction installed` のログを確認します。
 
-追加対策候補の `timeBasedFramePose: true` は `correctFramePose: true` と併用します。
+今回正常動作を確認した `timeBasedFramePose: true` は `correctFramePose: true` と併用します。
 変化中の飛行姿勢を照合する代わりに、フレームの予測時刻に対応する物理HMD姿勢を
-元のドライバー入力から補間・予測します。既定falseで、今回の候補の実機検証用です。
+元のドライバー入力から補間・予測します。ソースの既定はfalseなので明示的に有効にします。
 有効時のログは `timed=1` になります。falseへ戻すと従来の履歴照合方式を使います。
 
 解除する場合は `./install-driver.ps1 -Uninstall` を実行し、SteamVRを再起動します。

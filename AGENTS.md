@@ -16,7 +16,7 @@ FlugelKranz は、Reina_Sakiria が実現した VRChat 上の「自由飛行」�
 - Windows の入力は SteamVR の論理 Drag / Turn / reset_hold アクションを使います。Linux 専用のタッチ組み合わせや Index 感圧設定を Windows で適用しません。物理姿勢はnativeドライバーが変換前に保存した共有メモリーから読みます。
 - `src/FlugelKranz.OpenVR/` は SteamVR Input とドライバーIPCを担当します。`native/driver/` はMSVC/CMakeでビルドするXYZ変換用ドライバーです。ChaperoneはPitch/Rollを破棄することを実機確認済みなので、飛行変換に使用しません。旧Chaperoneクラスは互換性検証用です。
 - Windows配布は `build-windows.ps1` でドライバーとアプリをまとめて生成します。登録スクリプトはSteamVRを再起動しません。自動テストと実機フックの検証を区別してください。
-- Windowsの表示補正はDirectMode_009 SubmitLayerのフレーム姿勢を物理空間へ戻します。`correctFramePose` と追加候補 `timeBasedFramePose` は既定false。Quest 2 / VDで回転・保持中の頭の動きは改善報告あり。同時操作中のジッターは対策中です。最新の実機確認範囲は `WINDOWS.md`。
+- Windowsの表示補正はDirectMode_009 SubmitLayerのフレーム姿勢を物理空間へ戻します。`correctFramePose=true` と `timeBasedFramePose=true` の5b41cabでQuest 2 + Touch / VDの同時回転・頭部運動が正常という実機報告あり（2026-09-13）。両設定のソース既定はfalse。確認範囲は `WINDOWS.md`。
 - `ControllerInputMapping` は共有の Core に配置します（既存呼び出し元の互換性のため namespace は `FlugelKranz.OpenXR`）。
 - `src/FlugelKranz.OpenVR/Vendor/` は対応する公式 OpenVR C# バインディング・win64 DLL・ライセンスです。生成コードを直接編集せず、SDK の同一コミットから一緒に更新します。
 
