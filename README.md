@@ -1,5 +1,8 @@
 # FlugelKranz
 
+Windows x64 / SteamVR 向けの初期移植を追加しています。起動・制約・実機確認手順は
+[WINDOWS.md](WINDOWS.md) を参照してください。以下は Linux / Monado 版の仕様です。
+
 Monado / WiVRn と Linux Wayland 環境向けの、自由飛行 / 無限歩行ツールです。
 
 ## 起動

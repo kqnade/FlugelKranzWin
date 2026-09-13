@@ -8,6 +8,18 @@ namespace FlugelKranz.Tests;
 public class FlightControllerTests
 {
     [Fact]
+    public async Task DisposeFailureReportsOffAndAllowsControllerShutdown()
+    {
+        var runtime = new FakeRuntime { ThrowOnDispose = true };
+        var progress = new Recorder();
+        var controller = new FlightController(() => runtime, progress);
+        controller.SetEnabled(true);
+        await Wait(() => progress.Statuses.Any(s => s.Connected));
+        await controller.DisposeAsync();
+        Assert.Contains(progress.Statuses, s => !s.Enabled && !s.Connected && s.Message.Contains("dispose failed"));
+    }
+
+    [Fact]
     public async Task OffRetainsOffsetResetRestoresAndShutdownDisposes()
     {
         var runtime = new FakeRuntime();
@@ -259,7 +271,7 @@ public class FlightControllerTests
         public int Reads => Volatile.Read(ref reads);
         public RigidPose OriginalOffset => RigidPose.Identity;
         public RigidPose CurrentOffset { get { lock (gate) return offset; } }
-        public volatile bool Disposed, ThrowOnRead;
+        public volatile bool Disposed, ThrowOnRead, ThrowOnDispose;
         public int Restores;
         private int reads;
         public InputFrame ReadPhysical()
@@ -269,6 +281,10 @@ public class FlightControllerTests
         }
         public void Apply(RigidPose value) { lock (gate) offset = value; }
         public void Restore() { Restores++; Apply(OriginalOffset); }
-        public void Dispose() => Disposed = true;
+        public void Dispose()
+        {
+            Disposed = true;
+            if (ThrowOnDispose) throw new IOException("dispose failed");
+        }
     }
 }

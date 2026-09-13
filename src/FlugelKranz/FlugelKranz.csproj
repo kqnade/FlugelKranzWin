@@ -9,7 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="../../LICENSE" Link="LICENSE" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../WINDOWS.md" Link="WINDOWS.md" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="..\FlugelKranz.OpenXR\FlugelKranz.OpenXR.csproj" />
+    <ProjectReference Include="..\FlugelKranz.OpenVR\FlugelKranz.OpenVR.csproj" />
   </ItemGroup>
 
   <ItemGroup>

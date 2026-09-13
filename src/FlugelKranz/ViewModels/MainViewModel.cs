@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using FlugelKranz.Core;
 using FlugelKranz.OpenXR;
+using FlugelKranz.OpenVR;
 using System.Numerics;
 
 namespace FlugelKranz.ViewModels;
@@ -132,16 +133,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public string ValveIndexForceStatus =>
         $"Valve Index force — 左: {LeftValveIndexForce:0.00} / 右: {RightValveIndexForce:0.00}";
 
-    public MainViewModel(string libraryPath, string? settingsPath = null)
+    public MainViewModel(string libraryPath, string? settingsPath = null,
+        Func<Func<ValveIndexInputSettings>, IFlightRuntime>? runtimeFactory = null)
     {
         settingsStore = new(settingsPath);
         ApplySettings(settingsStore.Load());
         PropertyChanged += SettingsChanged;
         controller = new(
-            () => new MonadoFlightRuntime(libraryPath, CreateValveIndexSettings),
+            () => runtimeFactory is not null ? runtimeFactory(CreateValveIndexSettings)
+                : OperatingSystem.IsWindows()
+                ? new OpenVrFlightRuntime(CreateValveIndexSettings)
+                : new MonadoFlightRuntime(libraryPath, CreateValveIndexSettings),
             new UiProgress(Update),
             CreateSettings);
-        if (File.Exists(libraryPath))
+        if (runtimeFactory is null && !OperatingSystem.IsWindows() && File.Exists(libraryPath))
         {
             Mode = FlightMode.InfiniteWalking;
             IsEnabled = true;

@@ -287,7 +287,11 @@ public sealed class FlightController(
             {
                 try { runtime.Restore(); }
                 catch (Exception exception) { error = $"{error}\n復元に失敗しました: {exception.Message}".Trim(); }
-                finally { runtime.Dispose(); }
+                finally
+                {
+                    try { runtime.Dispose(); }
+                    catch (Exception exception) { error = $"{error}\n切断処理に失敗しました: {exception.Message}".Trim(); }
+                }
             }
             lock (gate)
             {

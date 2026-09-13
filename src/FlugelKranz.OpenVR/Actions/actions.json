@@ -1,0 +1,80 @@
+{
+  "actions": [
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_pose",
+      "type": "pose"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_trackpad",
+      "type": "vector2"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_force",
+      "type": "vector1"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_touch",
+      "type": "boolean"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_thumbrest",
+      "type": "boolean"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/left_trigger",
+      "type": "boolean"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_pose",
+      "type": "pose"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_trackpad",
+      "type": "vector2"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_force",
+      "type": "vector1"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_touch",
+      "type": "boolean"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_thumbrest",
+      "type": "boolean"
+    },
+    {
+      "requirement": "optional",
+      "name": "/actions/flight/in/right_trigger",
+      "type": "boolean"
+    }
+  ],
+  "default_bindings": [
+    {
+      "controller_type": "knuckles",
+      "binding_url": "bindings_knuckles.json"
+    },
+    {
+      "controller_type": "oculus_touch",
+      "binding_url": "bindings_touch.json"
+    }
+  ],
+  "action_sets": [
+    {
+      "name": "/actions/flight",
+      "usage": "leftright"
+    }
+  ]
+}

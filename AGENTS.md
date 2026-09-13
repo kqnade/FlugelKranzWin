@@ -12,8 +12,13 @@ FlugelKranz は、Reina_Sakiria が実現した VRChat 上の「自由飛行」�
 
 ## プロジェクト構成
 
-- `FlugelKranz.slnx` は、`src/` 配下の4つの C# プロジェクトと `tests/` 配下のテストをまとめます。
-- `src/FlugelKranz/` は Avalonia のネイティブ Wayland アプリです。`Views/` の UI は Avalonia.Markup.Declarative で C# に記述し、`ViewModels/` には CommunityToolkit.Mvvm を使用します。
+- Windows 移植の対応条件と手順は `WINDOWS.md`。Windows では `UseWin32()` と `FlugelKranz.OpenVR` を使用し、Linux は従来の `UseWayland()` と Monado を維持します。Windows は OFF で起動します。
+- `src/FlugelKranz.OpenVR/` は SteamVR Input と Standing working-set preview を担当します。Monado の原点 API に関する規則は Linux 経路へ適用します。OpenVR ではルーム設定を Commit しません。
+- `ControllerInputMapping` は共有の Core に配置します（既存呼び出し元の互換性のため namespace は `FlugelKranz.OpenXR`）。
+- `src/FlugelKranz.OpenVR/Vendor/` は対応する公式 OpenVR C# バインディング・win64 DLL・ライセンスです。生成コードを直接編集せず、SDK の同一コミットから一緒に更新します。
+
+- `FlugelKranz.slnx` は、`src/` 配下の5つの C# プロジェクトと `tests/` 配下のテストをまとめます。
+- `src/FlugelKranz/` は Avalonia の Windows / ネイティブ Wayland アプリです。`Views/` の UI は Avalonia.Markup.Declarative で C# に記述し、`ViewModels/` には CommunityToolkit.Mvvm を使用します。
 - `src/MonadoXrApi/` は libmonado の汎用相互運用ライブラリです。`LibMonadoLibrary` がネイティブライブラリのロードと ABI バージョン確認を担い、`MonadoRoot` が公開 libmonado API を型付きでラップします。このプロジェクトは `FlugelKranz.Core` を参照せず、FlugelKranz 固有の座標・入力・操作方針、および OpenXR 実装を含めません。
 - `src/FlugelKranz.OpenXR/` は Evergine.Bindings.OpenXR による入力取得と、OpenXR 姿勢を FlugelKranz の物理座標系へ変換する実装を担当します。`FlugelKranz.Core` と `MonadoXrApi` を参照し、両者を結び付ける FlugelKranz 固有のランタイム実装を置きます。
 - `src/MonadoXrApi/monado/` は、ネイティブコードとテストを含む上流の Git サブモジュールです。以下の読み取り専用規則に従ってください。

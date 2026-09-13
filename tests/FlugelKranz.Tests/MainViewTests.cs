@@ -171,7 +171,8 @@ public class MainViewTests
     [AvaloniaFact]
     public async Task MissingRuntimeReturnsToggleToOffAndDisplaysError()
     {
-        await using var vm = new MainViewModel("/nonexistent/flugelkranz-test.so", TemporarySettingsPath());
+        await using var vm = new MainViewModel("/nonexistent/flugelkranz-test.so", TemporarySettingsPath(),
+            _ => throw new InvalidOperationException("missing runtime: flugelkranz-test.so"));
         var window = new Window { Width = 540, Height = 600, Content = new MainView(vm) };
         window.Show();
         try

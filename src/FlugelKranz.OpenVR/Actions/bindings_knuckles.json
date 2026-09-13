@@ -1,0 +1,63 @@
+{
+  "description": "FlugelKranz default controls",
+  "controller_type": "knuckles",
+  "name": "FlugelKranz",
+  "bindings": {
+    "/actions/flight": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/trackpad",
+          "mode": "trackpad",
+          "inputs": {
+            "touch": {
+              "output": "/actions/flight/in/left_touch"
+            },
+            "position": {
+              "output": "/actions/flight/in/left_trackpad"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/trackpad",
+          "mode": "force_sensor",
+          "inputs": {
+            "force": {
+              "output": "/actions/flight/in/left_force"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trackpad",
+          "mode": "trackpad",
+          "inputs": {
+            "touch": {
+              "output": "/actions/flight/in/right_touch"
+            },
+            "position": {
+              "output": "/actions/flight/in/right_trackpad"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trackpad",
+          "mode": "force_sensor",
+          "inputs": {
+            "force": {
+              "output": "/actions/flight/in/right_force"
+            }
+          }
+        }
+      ],
+      "poses": [
+        {
+          "output": "/actions/flight/in/left_pose",
+          "path": "/user/hand/left/pose/raw"
+        },
+        {
+          "output": "/actions/flight/in/right_pose",
+          "path": "/user/hand/right/pose/raw"
+        }
+      ]
+    }
+  }
+}
