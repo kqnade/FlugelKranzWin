@@ -96,6 +96,13 @@ C++ではXYZのbody poseへの書き戻し、非可換な回転の合成順序�
 表示不具合の解消・head calibrationの合成・VRChatでの全軸回転は実機確認が必要です。
 SteamVRログの `XYZ body-pose transforms v2` で新DLLのロードを識別できます。
 
+追加の実測ではMirrorViewは正常という報告があり、静止時の飛行回転39.51°が
+Direct Modeへ渡るフレーム姿勢にも含まれていました。配布ドライバーの
+`resources/settings/default.vrsettings` にある `correctFramePose` は、そのフレーム姿勢から
+飛行変換を除く実験的オプションです（既定false、変更後SteamVR再起動）。
+履歴と予測時刻から対応を推定し、対応が曖昧なら補正しません。画像自体は変更しません。
+HMD表示での効果・操作中の安定性は未検証です。詳細は `native/driver/README.md`。
+
 実機では、最初にOFFのまま診断し、HMD・両手を確認します。その後、小さい移動と
 各軸の回転、ボタン解放、OFF、↻、終了復元を確認します。他のposeフック系ツールとの
 共存やFBT全機種は未検証です。問題があればドライバーを解除できます。

@@ -7,7 +7,9 @@
 #include <cstring>
 #include <new>
 #include <cstdio>
+#include <chrono>
 #include "Transform.h"
+#include "FrameHistory.h"
 
 namespace {
 using Callback=void(*)(void*,uint32_t,const vr::DriverPose_t&,uint32_t);
@@ -23,7 +25,7 @@ struct CallbackScope {
 };
 flight::Pose command;
 uint64_t lastHeartbeat=0;
-// Passive Direct Mode diagnostics. No layer fields or textures are modified.
+// Direct Mode diagnostics and opt-in render-pose correction. Textures are untouched.
 using Added=bool(*)(void*,const char*,vr::ETrackedDeviceClass,vr::ITrackedDeviceServerDriver*);
 using Component=void*(*)(void*,const char*);
 using Layer=vr::IVRDriverDirectModeComponent::SubmitLayerPerEye_t;
@@ -37,11 +39,18 @@ void* submitTarget=nullptr;
 std::mutex observerGate;
 std::atomic<uint64_t> nextFrameLog{0};
 bool observeFrames=false;
+bool correctFramePose=false;
+flight::FrameHistory frameHistory;
+std::mutex historyGate;
+double frameTimeMs() {
+    return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 bool observerStopping=false; // protected by observerGate
 
 void observedSubmit(void* self,const Layer(&eyes)[2]) {
     CallbackScope scope;
-    // Copy metadata before forwarding, but always forward the original array.
+    // Textures/projection/timing stay untouched. Only matched render pose metadata
+    // is copied and converted back to physical space for the streaming driver.
     auto pose=eyes[0].mHmdPose;
     auto prediction=eyes[0].flHmdPosePredictionTimeInSecondsFromNow;
     auto now=GetTickCount64();
@@ -59,16 +68,29 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
         }
         gate.unlock();
     }
-    submitOriginal(self,eyes);
+    flight::FrameMatch match;
+    Layer corrected[2];
+    if(correctFramePose) {
+        std::lock_guard<std::mutex> lock(historyGate);
+        match=frameHistory.match(frameTimeMs(),prediction,pose);
+        // Both eyes must identify the same transform; otherwise forward neither.
+        auto right=frameHistory.match(frameTimeMs(),eyes[1].flHmdPosePredictionTimeInSecondsFromNow,eyes[1].mHmdPose);
+        if(!right.found || (match.found && flight::matrixError(flight::matrix(match.transform),flight::matrix(right.transform))>0.04)) match.found=false;
+    }
+    if(match.found) {
+        std::memcpy(corrected,eyes,sizeof(corrected));
+        for(auto& eye:corrected) eye.mHmdPose=flight::removeTransform(eye.mHmdPose,match.transform);
+        submitOriginal(self,corrected);
+    } else submitOriginal(self,eyes);
     if(log) {
         char message[1400];
         std::snprintf(message,sizeof(message),
-            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f "
+            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f "
             "layer=[%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f] "
             "commandQxyzw=[%.6f %.6f %.6f %.6f] commandP=[%.6f %.6f %.6f] "
             "physicalQxyzw=[%.6f %.6f %.6f %.6f] physicalP=[%.6f %.6f %.6f]",
             static_cast<unsigned long long>(now),sampled?1:0,
-            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,
+            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,
             pose.m[0][0],pose.m[0][1],pose.m[0][2],pose.m[0][3],
             pose.m[1][0],pose.m[1][1],pose.m[1][2],pose.m[1][3],
             pose.m[2][0],pose.m[2][1],pose.m[2][2],pose.m[2][3],
@@ -91,7 +113,7 @@ void* observedComponent(void* self,const char* name) {
             submitTarget=target;
             status=MH_EnableHook(target);
         }
-        vr::VRDriverLog()->Log(status==MH_OK?"FrameAudit: DirectMode_009 SubmitLayer observer installed (no writes)":"FrameAudit: SubmitLayer observer failed");
+        vr::VRDriverLog()->Log(status==MH_OK?(correctFramePose?"FrameAudit: DirectMode_009 history-matched pose correction installed":"FrameAudit: DirectMode_009 SubmitLayer observer installed (no writes)"):"FrameAudit: SubmitLayer hook failed");
     }
     return result;
 }
@@ -136,6 +158,7 @@ void refresh() {
 }
 void updated(int index,void* host,uint32_t device,const vr::DriverPose_t& input,uint32_t size) {
     CallbackScope scope;
+    auto received=frameTimeMs();
     // Never inspect an unknown ABI-sized pose.
     if(size!=sizeof(vr::DriverPose_t)) { originals[index](host,device,input,size); return; }
     vr::DriverPose_t output;
@@ -150,6 +173,10 @@ void updated(int index,void* host,uint32_t device,const vr::DriverPose_t& input,
             ReleaseMutex(ipcMutex);
         }
         output=flight::apply(input,command);
+        if(device==0 && correctFramePose) {
+            std::lock_guard<std::mutex> historyLock(historyGate);
+            frameHistory.add(received,output,command);
+        }
     }
     originals[index](host,device,output,size);
 }
@@ -174,6 +201,7 @@ public:
         minHookInitialized=true;
         observerStopping=false;
         observeFrames=vr::VRSettings()->GetBool("driver_flugelkranz","observeFrames");
+        correctFramePose=vr::VRSettings()->GetBool("driver_flugelkranz","correctFramePose");
         const char* versions[]={"IVRServerDriverHost_006","IVRServerDriverHost_005"};
         void* detours[]={reinterpret_cast<void*>(updated0),reinterpret_cast<void*>(updated1)};
         void* addedDetours[]={reinterpret_cast<void*>(added0),reinterpret_cast<void*>(added1)};
@@ -182,7 +210,7 @@ public:
             vr::EVRInitError error=vr::VRInitError_None;
             auto host=context->GetGenericInterface(versions[i],&error);
             if(!host || error!=vr::VRInitError_None) continue;
-            if(observeFrames) {
+            if(observeFrames || correctFramePose) {
                 auto addedTarget=(*reinterpret_cast<void***>(host))[0];
                 if(i==0 || addedTarget!=addedTargets[0]) {
                     if(MH_CreateHook(addedTarget,addedDetours[i],reinterpret_cast<void**>(&addedOriginal[i]))!=MH_OK) {Cleanup();return vr::VRInitError_Driver_Failed;}
@@ -225,6 +253,7 @@ public:
         if(ipcMutex) {CloseHandle(ipcMutex);ipcMutex=nullptr;}
         if(minHookInitialized) {MH_Uninitialize();minHookInitialized=false;}
         command={};lastHeartbeat=0;
+        frameHistory.clear();
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }
     const char* const* GetInterfaceVersions() override {return vr::k_InterfaceVersions;}

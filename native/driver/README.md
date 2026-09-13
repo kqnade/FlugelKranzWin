@@ -44,6 +44,24 @@ HMDs registered before this driver will not produce layer records. Forwarding un
 tests do not establish that the installed VD driver uses this observed interface.
 Set observeFrames back to false and restart to remove these diagnostic hooks.
 
+Experimental render-pose correction: `driver_flugelkranz.correctFramePose=true`
+also installs the DirectMode_009 hook. It copies each submitted layer and removes
+the flight transform from both `mHmdPose` matrices; textures, depth, projection,
+bounds and prediction intervals remain unchanged. The option defaults to false.
+It is a hardware-validation candidate, not a verified streaming compatibility fix.
+
+The transform is selected from the last 128 valid HMD output samples (at most
+250ms old), using a high-resolution receipt timestamp, driver poseTimeOffset,
+linear/angular velocity and SubmitLayer's prediction interval. Predictions beyond
+100ms are rejected. This is a best-fit association, NOT an exact frame ID: the API
+does not supply our command ID and SteamVR's prediction implementation is not
+duplicated exactly. Both eyes must match. Missing/ambiguous matches forward the
+original layer unchanged and appear as `corrected=0` in the rate-limited audit log;
+this may leave intermittent borders during motion. `corrected=1` means a matched
+inverse was applied, not that the HMD displayed it correctly. A full dynamic-motion
+test remains necessary. The Core and the application-visible flight pose are not
+changed by this option. Set both options false and restart to remove the hooks.
+
 The server driver modifies every device whose pose update passes through the
 hooked host functions, including HMD, controllers and FBT trackers. Other drivers
 that hook the same functions need separate compatibility testing. No installer

@@ -6,11 +6,12 @@ namespace {
 const Layer* expectedEyes=nullptr;
 Layer expectedCopy[2]{};
 unsigned forwarded=0;
+bool expectCopy=false;
 void* expectedSelf=reinterpret_cast<void*>(0x1234);
 void require(bool condition) {if(!condition) std::abort();}
 void forwardedSubmit(void* self,const Layer(&eyes)[2]) {
     require(self==expectedSelf);
-    require(&eyes[0]==expectedEyes);
+    require((&eyes[0]!=expectedEyes)==expectCopy);
     require(std::memcmp(eyes,expectedCopy,sizeof(expectedCopy))==0);
     forwarded++;
 }
@@ -41,5 +42,31 @@ int main() {
     require(observedComponent(expectedSelf,"IVRDriverDirectModeComponent_008")==componentResult);
     require(submitTarget==nullptr && componentTarget==nullptr);
     require(forwarded==3 && inFlight==0);
+    vr::DriverPose_t head{};
+    head.qRotation.w=head.qWorldFromDriverRotation.w=head.qDriverFromHeadRotation.w=1;
+    head.poseIsValid=head.deviceIsConnected=true;
+    head.vecPosition[0]=1;
+    flight::Pose transform{0,std::sqrt(0.5),0,std::sqrt(0.5),3,0,0};
+    auto output=flight::apply(head,transform);
+    for(auto& eye:eyes) {
+        eye.mHmdPose=flight::matrix(flight::physical(output));
+        eye.flHmdPosePredictionTimeInSecondsFromNow=0.02f;
+        eye.hDepthTexture=56;eye.bounds.uMin=0.2f;eye.mProjection.m[2][2]=0.75f;
+    }
+    Layer originalCopy[2];std::memcpy(originalCopy,eyes,sizeof(eyes));
+    std::memcpy(expectedCopy,eyes,sizeof(eyes));
+    for(auto& eye:expectedCopy) eye.mHmdPose=flight::matrix(flight::physical(head));
+    // Float rounding after inverse multiplication is checked separately; retain
+    // the full byte-level check for all fields outside the pose matrix.
+    for(int i=0;i<2;i++) expectedCopy[i].mHmdPose=flight::removeTransform(eyes[i].mHmdPose,transform);
+    correctFramePose=true;expectCopy=true;
+    frameHistory.add(frameTimeMs(),output,transform);
+    observedSubmit(expectedSelf,eyes);
+    require(forwarded==4 && inFlight==0);
+    require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
+    frameHistory.clear();expectCopy=false;
+    std::memcpy(expectedCopy,eyes,sizeof(eyes));
+    observedSubmit(expectedSelf,eyes);
+    require(forwarded==5 && inFlight==0);
     std::puts("Observer forwards original layers and ignores unavailable/unsupported interfaces: passed");
 }
