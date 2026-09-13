@@ -61,7 +61,7 @@ internal static class Program
             if (diagnose)
             {
                 using IFlightRuntime runtime = OperatingSystem.IsWindows()
-                    ? new OpenVrFlightRuntime()
+                    ? new DriverFlightRuntime()
                     : new MonadoFlightRuntime(MonadoLibraryPath);
                 if (runtime is MonadoFlightRuntime monado)
                     foreach (var origin in monado.TrackingOrigins)
@@ -74,6 +74,8 @@ internal static class Program
                         Console.WriteLine($"追跡: HMD={frame.HeadTracked}, 左={frame.Left.IsTracked}, 右={frame.Right.IsTracked}");
                         if (runtime is OpenVrFlightRuntime steamVr)
                             Console.WriteLine(steamVr.InputDiagnostics);
+                        if (runtime is DriverFlightRuntime driver)
+                            Console.WriteLine(driver.InputDiagnostics);
                     }
                     if (frame.HeadTracked && frame.Left.IsTracked && frame.Right.IsTracked)
                     { Console.WriteLine("ランタイム接続、基準空間、HMD・両手の入力を確認しました。空間は変更していません。"); return 0; }

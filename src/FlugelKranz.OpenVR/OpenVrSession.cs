@@ -92,6 +92,9 @@ internal sealed class OpenVrSession : IOpenVrSession
     }
 
     public void OpenBindings() => Check(input.OpenBindingUI(AppKey, actionSets[0].ulActionSet, 0, true), "OpenBindingUI");
+    public (uint Left, uint Right) ControllerDevices() => (
+        system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.LeftHand),
+        system.GetTrackedDeviceIndexForControllerRole(ETrackedControllerRole.RightHand));
     public void HidePreview() => chaperone.HideWorkingSetPreview();
     public string DescribeInput() => $"left: Drag={lastFrame.Left.Drag}, Turn={lastFrame.Left.Turn}; right: Drag={lastFrame.Right.Drag}, Turn={lastFrame.Right.Turn}";
 

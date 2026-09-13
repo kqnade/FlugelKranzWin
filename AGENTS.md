@@ -13,8 +13,9 @@ FlugelKranz は、Reina_Sakiria が実現した VRChat 上の「自由飛行」�
 ## プロジェクト構成
 
 - Windows 移植の対応条件と手順は `WINDOWS.md`。Windows では `UseWin32()` と `FlugelKranz.OpenVR` を使用し、Linux は従来の `UseWayland()` と Monado を維持します。Windows は OFF で起動します。
-- Windows の入力は SteamVR の論理 Drag / Turn / reset_hold アクションを使います。Linux 専用のタッチ組み合わせや Index 感圧設定を Windows で適用しません。HMD と両手は同じ IVRSystem raw pose 配列から読み、pose action と混在させません。
-- `src/FlugelKranz.OpenVR/` は SteamVR Input と Standing working-set preview を担当します。Monado の原点 API に関する規則は Linux 経路へ適用します。OpenVR ではルーム設定を Commit しません。
+- Windows の入力は SteamVR の論理 Drag / Turn / reset_hold アクションを使います。Linux 専用のタッチ組み合わせや Index 感圧設定を Windows で適用しません。物理姿勢はnativeドライバーが変換前に保存した共有メモリーから読みます。
+- `src/FlugelKranz.OpenVR/` は SteamVR Input とドライバーIPCを担当します。`native/driver/` はMSVC/CMakeでビルドするXYZ変換用ドライバーです。ChaperoneはPitch/Rollを破棄することを実機確認済みなので、飛行変換に使用しません。旧Chaperoneクラスは互換性検証用です。
+- Windows配布は `build-windows.ps1` でドライバーとアプリをまとめて生成します。登録スクリプトはSteamVRを再起動しません。自動テストと実機フックの検証を区別してください。
 - `ControllerInputMapping` は共有の Core に配置します（既存呼び出し元の互換性のため namespace は `FlugelKranz.OpenXR`）。
 - `src/FlugelKranz.OpenVR/Vendor/` は対応する公式 OpenVR C# バインディング・win64 DLL・ライセンスです。生成コードを直接編集せず、SDK の同一コミットから一緒に更新します。
 

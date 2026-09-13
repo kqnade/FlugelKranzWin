@@ -1,106 +1,99 @@
-# FlugelKranz Windows port（初期移植）
+# FlugelKranz Windows / SteamVR driver port
 
-Windows x64 / SteamVR の Standing 空間を対象とした初期移植です。
-自由飛行・無限歩行・慣性・モード移行・設定画面には既存の Core / UI を使用します。
-Linux / Monado 経路も維持しています。
+Windows x64 / SteamVR用の実験段階の移植です。自由飛行・無限歩行・慣性・UIは
+FlugelKranzのCoreを使用し、XYZ全3軸の変換は専用SteamVRドライバーで適用します。
+Linux / Monado経路は維持しています。
 
-## 起動
+## 重要な変更
 
-.NET 10 SDK を使用します。
+以前のWindows版はChaperone working-set previewへ全軸回転を書いていましたが、
+対象SteamVRではYawだけが保持され、Pitch / Rollは破棄されました。
+これを外部変更と誤判定し、OFF・復元失敗・切断失敗が表示される問題がありました。
+プレビューを行わない書き込み・読み戻し試験で、この制約を確認しました。
+この方式はXYZ回転に使用しません。新しいWindows版には下記ドライバーが必要です。
 
-```powershell
-dotnet build FlugelKranz.slnx
-dotnet test FlugelKranz.slnx
-dotnet run --project src/FlugelKranz -- --diagnose
-dotnet run --project src/FlugelKranz
-```
+## ビルドと導入
 
-SteamVR を先に起動してください。Windows では OFF で起動し、ON を押すと接続します。
-`--diagnose` は UI を開かず HMD・両手の有効な pose を確認します。
-アクション登録・入力の読み取りは行いますが、空間を書き換えません。
-実際のタッチ・Force 操作やゲームへの反映まで保証する診断ではありません。
-Windows では `--lib-monado` は使用しません。
-
-単体配布用のビルド:
+.NET 10 SDK、MSVC x64 Build Tools、Windows SDK、CMakeを使用します。
 
 ```powershell
-dotnet publish src/FlugelKranz -c Release -r win-x64 --self-contained true -o artifacts/windows-x64
+./build-windows.ps1
+# PATHにない場合は -Dotnet PATH -CMake PATH で指定
 ```
 
-出力フォルダー全体を配布します。`FlugelKranz.exe`、`openvr_api.dll`、`Actions/`、
-`manifest.vrmanifest`、`LICENSE-OpenVR` を一緒に配置してください。GPL-3.0 の本体ソースも提供してください。
-設定保存先は既存仕様の `%USERPROFILE%/.config/FlugelKranz/config.json` です。
-`FLUGELKRANZ_CONFIG` と `XDG_CONFIG_HOME` による上書きも維持しています。
+`artifacts/windows-x64` が単体配布フォルダーです。全体を同じ場所に配置し、
+そのフォルダーの `install-driver.ps1` を実行してSteamVRへ登録します。
+スクリプトはSteamVRのvrpathregで登録するだけで、SteamVRを終了しません。
+登録後にSteamVRを終了して再起動してください。VRChatも再起動が必要になります。
 
-## 入力と空間
+```powershell
+cd artifacts/windows-x64
+./install-driver.ps1
+# SteamVRを再起動してから:
+./FlugelKranz.exe --diagnose
+./FlugelKranz.exe
+```
 
-既定バインディングは Valve Index (`knuckles`) と Touch (`oculus_touch`) 用です。
-Windows 版は左右の Drag / Turn / reset_hold を SteamVR の boolean action として公開します。
-Linux のタッチ組み合わせ判定は使用しません。
-Touch は左右グリップ押下が Drag、左 X / 右 A 押下が Turn です。
-Index は左右トリガー押下が Drag、左右 A 押下が Turn です。タッチだけでは動きません。
-reset_hold は既定で未割当です。割り当てると片手1秒保持でモード別リセット、
-両手1秒保持でモード切替になります。
+解除する場合は `./install-driver.ps1 -Uninstall` を実行し、SteamVRを再起動します。
+SteamVRのアドオン管理でドライバーを無効化した場合は、ONにしても接続できません。
+アプリはOFFで起動します。SteamVRの自動起動設定は追加しません。
+`--diagnose` は姿勢と論理入力を読み、飛行変換を書き込みません。
+`--lib-monado` はWindowsでは使用しません。
 
-⚙ →「SteamVR のバインド設定を開く」で編集できます（OFF のままで可）。
-または `FlugelKranz.exe --bindings` を実行します。SteamVR には固定キー
-`org.flugelkranz.windows`、名前 `FlugelKranz` で登録されます。
-SteamVR のコントローラーバインド一覧でもこの名前を選び、Drag / Turn を好きな
-ボタンのクリックやタッチに割り当てられます。旧版の `system.generated.flugelkranz.exe`
-とは別登録です。SteamVR 自動起動設定は追加しません。
+## 操作とバインド
 
-HMD と両手は1回の `GetDeviceToAbsoluteTrackingPose(RawAndUncalibrated)` の配列から
-読みます。旧版の HMD は IVRSystem、両手は pose action という入力取得の混在を解消しました。
-I モードで報告されたジッターに対する修正候補です。実機での解消は再確認が必要です。
+* I: 無限歩行。Y移動とYaw回転。
+* F: 自由飛行。XYZ移動とXYZ全3軸回転。
+* Touch: 左右グリップ押下がDrag、左X / 右A押下がTurn。
+* Index: 左右トリガー押下がDrag、左右A押下がTurn。
+* 押しながら手を動かすと空間を引っ張り、Turnを押して手首を傾けると回転します。
+* 操作を始める前にボタンを一度離します。OFFでは変換を保持し、↻で元へ戻します。
+* reset_holdは既定で未割当。片手1秒保持でモード別リセット、両手1秒保持でモード切替。
 
-物理座標 P は接続時の Standing 空間です。OpenVR raw pose を R とし、
-接続時の Standing→Raw を S0 とすると P = S0⁻¹ R です。
-Core が出力する全軸変換 D をゲーム側へ適用するため、
-現在の Standing→Raw に S = S0 D⁻¹ を設定します。
-これによりゲームが受け取る姿勢は S⁻¹ R = D P となります。
-座標系は右手系、メートル、Y 上、-Z 前方です。VRChat 内の水平線設定は読み書きしません。
+⚙ →「SteamVR のバインド設定を開く」、または `FlugelKranz.exe --bindings` で
+編集できます。SteamVRのアプリ名は `FlugelKranz`、固定キーは
+`org.flugelkranz.windows` です。左右Drag / Turn / reset_holdを好きなボタンやタッチへ
+割り当てられます。Linux用のタッチ組み合わせ・Index感圧設定はWindowsでは使用しません。
 
-`SetWorkingStandingZeroPoseToRawTrackingPose` と `ShowWorkingSetPreview` を使い、
-ルーム設定をディスクへ Commit しません。OFF は変換を保持し、リセットと通常終了は
-接続時へ戻します。外部変更を検出した場合は上書きせず停止します。
-プロセス強制終了時の復元は保証できません。
+## 実装
 
-OVR Advanced Settings など、同じ Chaperone の working set / preview を操作する
-ツールは終了してから使用してください。API には排他的な所有権取得がないため、
-競合検出と書き込みの間の同時変更まで防止できません。
-Seated / Raw 空間を使うゲーム、SteamVR を経由しない OpenXR アプリは対象外です。
-
-## 3つのプロジェクトの役割
-
-* [FlugelKranz](https://github.com/ReinaS-64892/FlugelKranz): Core、操作仕様、Avalonia UI の移植元。
-* [OpenVR Advanced Settings](https://github.com/OpenVR-Advanced-Settings/OpenVR-AdvancedSettings):
-  `MoveCenterTabController::updateSpace` 周辺の working-set preview と空間操作の参照。
-  同時起動の依存ソフトではありません。
+* [FlugelKranz](https://github.com/ReinaS-64892/FlugelKranz): 操作仕様、Core、Avalonia UI。
+* [OVR Advanced Settings](https://github.com/OpenVR-Advanced-Settings/OpenVR-AdvancedSettings):
+  SteamVR Input、空間操作、Chaperoneの参照。旧Chaperoneバックエンドは互換性検証用に残します。
 * [Kawaii Move Assist](https://github.com/ReinaS-64892/reina_s_kawaii_move_assist):
-  OpenVR driver pose と world-from-driver 変換を調査。
-  取得時点の core は Hello World、driver は X に 5m 加える試作です。
-  今回そのドライバーは配布・登録せず、入力と飛行変換の分離設計の参照としています。
+  ドライバーのpose-updateフック方式を参照。固定X+5mの試作ドライバーそのものは導入しません。
 
-Chaperone 方式でピッチ・ロールがゲームへ正しく反映されなければ、KMA の driver hook
-方式を使う追加開発が必要です。その場合は全デバイスとトラッカーの姿勢、速度、
-他ドライバーとの共存、IPC と強制終了時の復元を別途実装・検証します。
+新しいドライバーはIVRServerDriverHost_005 / _006のpose updateへフックし、
+HMD・手・トラッカーのworld-from-driver変換に全軸変換を合成します。
+Chaperoneは書き換えません。変更前の物理姿勢を共有メモリーへ保存し、
+それをアプリの操作計算へ渡すため、飛行結果を入力へ戻す循環はありません。
 
-## 実機確認
+接続時のStanding→RawをS、物理姿勢をP=S⁻¹R、Coreの飛行変換をDとすると、
+ドライバーへ渡す変換はT=SDS⁻¹です。ゲーム側の姿勢はS⁻¹TR=DPになります。
+右手系、メートル、Y上、-Z前方です。VRChat内の水平線設定は読み書きしません。
 
-この移植はビルドと自動テストだけで完成判定しません。SteamVR / VRChat で次を確認します。
+ドライバーはアプリのheartbeatが500ms途絶えると所有権を解除して恒等変換へ戻します。
+復帰時は再接続が必要です。100msより古い物理姿勢は追跡喪失として扱います。
+OFF中はheartbeatを維持して変換を保持します。通常終了は変換を解除します。
+IPCの詳細・制約は `native/driver/README.md` を参照してください。
 
-1. `--diagnose` で HMD・両手が検出されること。
-2. SteamVR で設定した Drag / Turn / reset_hold が仕様通り動くこと。
-3. 無限歩行の高さ・Yaw、自由飛行の XYZ 移動と Yaw / Pitch / Roll が反映されること。
-4. 片手・両手の切替、慣性、モード変更、HMD / コントローラー追跡喪失と復帰。
-5. FBT 使用時に HMD・両手・全トラッカーが同じ変換を受けること。
-6. OFF の保持、全体リセット、終了後の元の空間への復元。
+## 検証と未確認事項
 
-自動テストでは行列の転置・回転順序、非ゼロ原点での全軸変換、入力への変換の
-二重適用防止、復元、外部変更を上書きしないこと、書き込み失敗を検証します。
+```powershell
+dotnet test FlugelKranz.slnx
+ctest --test-dir artifacts/driver-build -C Release --output-on-failure
+```
 
-2026-09-13: Windows x64 ビルドと137件の自動テストを確認。
-Quest 2 + Touch / Virtual Desktop + SteamVR で `--diagnose` が成功し、
-HMD・両手の有効な姿勢取得を確認しました。ゲーム内での移動・全軸回転・復元は未検証です。
-単体配布 EXE でも同じ診断に成功し、左右の thumb rest / trigger touch アクションが
-active であることを確認しました（実際のタッチ切替の検証は未実施）。
+C#では全軸の座標合成、入力への二重適用防止、復元、接続失敗、追跡喪失、
+Chaperoneが回転を拒否する場合の明示エラーを検証します。
+C++ではXYZ変換とdriver-space速度の維持を検証します。
+以前のChaperone版ではQuest 2 + Touch / Virtual Desktopの入力取得に成功しています。
+新ドライバーの実機フック・head calibrationの合成・VRChatでの全軸回転は導入後の確認が必要です。
+
+実機では、最初にOFFのまま診断し、HMD・両手を確認します。その後、小さい移動と
+各軸の回転、ボタン解放、OFF、↻、終了復元を確認します。他のposeフック系ツールとの
+共存やFBT全機種は未検証です。問題があればドライバーを解除できます。
+
+設定は `%USERPROFILE%/.config/FlugelKranz/config.json` に保存します。
+`FLUGELKRANZ_CONFIG` と `XDG_CONFIG_HOME` で変更できます。
+配布時は本体GPL-3.0ソースと同梱のOpenVR・MinHookライセンスを提供してください。

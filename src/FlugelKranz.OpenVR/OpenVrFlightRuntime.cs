@@ -11,6 +11,7 @@ public interface IOpenVrSession : IDisposable
     void HidePreview();
     string DescribeInput() => "";
     void OpenBindings() => throw new NotSupportedException();
+    (uint Left, uint Right) ControllerDevices() => (uint.MaxValue, uint.MaxValue);
 }
 
 public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider, IFlightBindings
@@ -65,8 +66,13 @@ public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
         // Therefore S = S0 * D^-1 and S^-1 * raw = D * P.
         var target = originalStanding * offset.Inverse();
         session.PreviewStanding(target);
-        expectedStanding = target;
+        expectedStanding = session.ReadWorkingStanding();
         previewOwned = true;
+        if (!expectedStanding.NearlyEquals(target, 0.000001f))
+        {
+            Restore();
+            throw new NotSupportedException("SteamVRのChaperoneは要求した回転を保持できません。XYZ回転にはFlugelKranzドライバーが必要です。");
+        }
         CurrentOffset = offset;
     }
 

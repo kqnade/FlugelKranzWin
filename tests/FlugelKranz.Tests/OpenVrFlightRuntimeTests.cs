@@ -146,18 +146,29 @@ public class OpenVrFlightRuntimeTests
         Assert.True(session.Disposed);
     }
 
+    [Fact]
+    public void RejectedPitchReportsUnsupportedAndRestoresWithoutExternalChangeError()
+    {
+        var session = new FakeSession { FlattenRotation = true };
+        using var runtime = new OpenVrFlightRuntime(session);
+        var error = Assert.Throws<NotSupportedException>(() => runtime.Apply(Pose(0, 0.2f, 0, Vector3.Zero)));
+        Assert.Contains("ドライバー", error.Message);
+        Assert.Equal(RigidPose.Identity, runtime.CurrentOffset);
+        Assert.Equal(1, session.Hides);
+    }
+
     private sealed class FakeSession : IOpenVrSession
     {
         public RigidPose Standing = RigidPose.Identity;
         public InputFrame Frame = new(RigidPose.Identity, true, default, default);
         public int Writes, Hides;
-        public bool Disposed, FailWrites;
+        public bool Disposed, FailWrites, FlattenRotation;
         public RigidPose ReadWorkingStanding() => Standing;
         public InputFrame ReadRaw() => Frame;
         public void PreviewStanding(RigidPose pose)
         {
             if (FailWrites) throw new IOException("write failed");
-            Standing = pose;
+            Standing = FlattenRotation ? pose with { Orientation = Quaternion.Identity } : pose;
             Writes++;
         }
         public void HidePreview() => Hides++;

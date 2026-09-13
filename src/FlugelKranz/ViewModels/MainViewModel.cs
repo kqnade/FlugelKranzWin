@@ -142,7 +142,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         controller = new(
             () => runtimeFactory is not null ? runtimeFactory(CreateValveIndexSettings)
                 : OperatingSystem.IsWindows()
-                ? new OpenVrFlightRuntime()
+                ? new DriverFlightRuntime()
                 : new MonadoFlightRuntime(libraryPath, CreateValveIndexSettings),
             new UiProgress(Update),
             CreateSettings);
