@@ -8,6 +8,35 @@ namespace FlugelKranz.Tests;
 public class FlightControllerTests
 {
     [Fact]
+    public async Task DashboardStopsInertiaAndClosingDoesNotRestoreIt()
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        var settings = FlugelKranzSettings.Default with
+        {
+            Mode = FlightMode.FreeFlight,
+            FreeFlight = FlightMotionSettings.Default with
+            { HeadPilotEnabled = true, InertiaDecelerationPerSecond = 0, DragSmoothSeconds = 0 }
+        };
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.SetEnabled(true);
+        var neutral = Frame(0,0) with { PilotAvailable = true };
+        await WaitForFrame(runtime, neutral);
+        await WaitForFrame(runtime, neutral with { PilotStick = Vector2.UnitY });
+        await Wait(() => runtime.CurrentOffset.Position.Z < -0.005f);
+        await WaitForFrame(runtime, neutral with { MotionSuspended = true });
+        var stopped = runtime.CurrentOffset;
+        await WaitForFrame(runtime, neutral with { MotionSuspended = true });
+        Assert.Equal(stopped, runtime.CurrentOffset);
+        await WaitForFrame(runtime, neutral);
+        await WaitForFrame(runtime, neutral);
+        Assert.Equal(stopped, runtime.CurrentOffset);
+        Assert.True(runtime.PilotEnabled);
+        controller.SetEnabled(false);
+        await Wait(() => !runtime.PilotEnabled);
+    }
+
+    [Fact]
     public async Task BindingEditorCanOpenWhileMovementStaysOff()
     {
         var runtime = new FakeRuntime();
@@ -274,7 +303,7 @@ public class FlightControllerTests
         public ConcurrentQueue<FlightStatus> Statuses { get; } = new();
         public void Report(FlightStatus value) => Statuses.Enqueue(value);
     }
-    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings
+    private sealed class FakeRuntime : IFlightRuntime, IFlightBindings, IFlightInputControl
     {
         private readonly object gate = new();
         private InputFrame frame = FlightControllerTests.Frame(0, 0);
@@ -286,6 +315,8 @@ public class FlightControllerTests
         public volatile bool Disposed, ThrowOnRead, ThrowOnDispose;
         public int Restores;
         public int BindingsOpened;
+        public volatile bool PilotEnabled;
+        public void SetPilotInputEnabled(bool value) => PilotEnabled = value;
         public void OpenBindings() => Interlocked.Increment(ref BindingsOpened);
         private int reads;
         public InputFrame ReadPhysical()

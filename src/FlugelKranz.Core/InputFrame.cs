@@ -15,4 +15,10 @@ public readonly record struct InputFrame(
     RigidPose Head,
     bool HeadTracked,
     HandSample Left,
-    HandSample Right);
+    HandSample Right)
+{
+    public System.Numerics.Vector2 PilotStick { get; init; }
+    public bool PilotHeld { get; init; }
+    public bool PilotAvailable { get; init; }
+    public bool MotionSuspended { get; init; }
+}

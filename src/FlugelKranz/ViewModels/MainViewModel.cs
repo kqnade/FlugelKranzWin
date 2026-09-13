@@ -29,6 +29,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [NotifyPropertyChangedFor(nameof(ModeLabel))]
     [NotifyPropertyChangedFor(nameof(ModeDescription))]
     private FlightMode mode = FlightMode.InfiniteWalking;
+    [ObservableProperty] private bool headPilotEnabled;
     [ObservableProperty] private bool useHeadTurnOrigin;
     [ObservableProperty] private bool inertiaCutoffEnabled = true;
     [ObservableProperty]
@@ -158,7 +159,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void SettingsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is not (
-            nameof(Mode) or nameof(UseHeadTurnOrigin) or
+            nameof(HeadPilotEnabled) or nameof(Mode) or nameof(UseHeadTurnOrigin) or
             nameof(InertiaCutoffEnabled) or nameof(DragCutoffCentimetresPerSecond) or
             nameof(TurnCutoffDegreesPerSecond) or nameof(DragAccelerationMultiplier) or
             nameof(TurnAccelerationMultiplier) or nameof(ZAccelerationMultiplier) or
@@ -181,6 +182,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         root = root.Normalized();
         Mode = root.Mode;
         var settings = root.FreeFlight;
+        HeadPilotEnabled = settings.HeadPilotEnabled;
         UseHeadTurnOrigin = settings.TurnOrigin == TurnOrigin.Head;
         InertiaCutoffEnabled = settings.InertiaCutoffEnabled;
         DragCutoffCentimetresPerSecond = Math.Round(settings.DragCutoffMetresPerSecond * 100, 6);
@@ -214,6 +216,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         apply(FlightMotionSettings.Default);
     }
 
+    [RelayCommand] private void ResetHeadPilot() => HeadPilotEnabled = false;
     [RelayCommand] private void ResetTurnOrigin() => ResetToDefaults(s => UseHeadTurnOrigin = s.TurnOrigin == TurnOrigin.Head);
     [RelayCommand] private void ResetInertiaCutoffEnabled() => ResetToDefaults(s => InertiaCutoffEnabled = s.InertiaCutoffEnabled);
     [RelayCommand] private void ResetDragCutoff() => ResetToDefaults(s => DragCutoffCentimetresPerSecond = s.DragCutoffMetresPerSecond * 100);
@@ -327,6 +330,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         Mode = Mode,
         FreeFlight = new()
         {
+            HeadPilotEnabled = HeadPilotEnabled,
             TurnOrigin = UseHeadTurnOrigin ? TurnOrigin.Head : TurnOrigin.TrackedElementsMidpoint,
             InertiaCutoffEnabled = InertiaCutoffEnabled,
             DragCutoffMetresPerSecond = (float)(DragCutoffCentimetresPerSecond / 100),

@@ -14,6 +14,8 @@ internal sealed class OpenVrSession : IOpenVrSession
     private readonly Dictionary<string, ulong> handles = [];
     private readonly VRActiveActionSet_t[] actionSets;
     private readonly TrackedDevicePose_t[] poses = new TrackedDevicePose_t[Vr.k_unMaxTrackedDeviceCount];
+    private readonly PilotInputGate pilotGate = new();
+    private bool pilotRequested;
     private InputFrame lastFrame;
     private bool disposed;
 
@@ -35,7 +37,15 @@ internal sealed class OpenVrSession : IOpenVrSession
             Check(input.SetActionManifestPath(Path.Combine(AppContext.BaseDirectory, "Actions", "actions.json")), "SetActionManifestPath");
             ulong set = 0;
             Check(input.GetActionSetHandle("/actions/flight", ref set), "GetActionSetHandle");
-            actionSets = [new() { ulActionSet = set }];
+            ulong pilotSet = 0;
+            Check(input.GetActionSetHandle("/actions/pilot", ref pilotSet), "GetActionSetHandle pilot");
+            actionSets = [new() { ulActionSet = set }, new() { ulActionSet = pilotSet }];
+            foreach (string control in new[] { "thrust", "left_toggle", "right_toggle" })
+            {
+                ulong handle = 0;
+                Check(input.GetActionHandle("/actions/pilot/in/" + control, ref handle), control);
+                handles.Add(control, handle);
+            }
             foreach (var hand in new[] { "left", "right" })
                 foreach (var control in new[] { "drag", "turn", "reset_hold" })
                 {
@@ -62,6 +72,8 @@ internal sealed class OpenVrSession : IOpenVrSession
         while (system.PollNextEvent(ref vrEvent, (uint)Marshal.SizeOf<VREvent_t>()))
             if (vrEvent.eventType == (uint)EVREventType.VREvent_Quit)
                 throw new InvalidOperationException("SteamVR が終了しました。");
+        bool dashboard = (Vr.Overlay ?? throw new InvalidOperationException("SteamVR Overlay が利用できません。")).IsDashboardVisible();
+        actionSets[1].nPriority = PilotInputGate.Priority(pilotRequested, dashboard);
         Check(input.UpdateActionState(actionSets, (uint)Marshal.SizeOf<VRActiveActionSet_t>()), "UpdateActionState");
         system.GetDeviceToAbsoluteTrackingPose(ETrackingUniverseOrigin.TrackingUniverseRawAndUncalibrated, 0, poses);
         var head = poses[Vr.k_unTrackedDeviceIndex_Hmd];
@@ -70,6 +82,24 @@ internal sealed class OpenVrSession : IOpenVrSession
         // coordinates with the unmodified physical pose used by the motion engine.
         lastFrame = new(tracked ? OpenVrPose.FromMatrix(head.mDeviceToAbsoluteTracking) : RigidPose.Identity,
             tracked, ReadHand("left", ETrackedControllerRole.LeftHand), ReadHand("right", ETrackedControllerRole.RightHand));
+        InputAnalogActionData_t thrust = default;
+        Check(input.GetAnalogActionData(handles["thrust"], ref thrust, (uint)Marshal.SizeOf<InputAnalogActionData_t>(), 0), "thrust");
+        var leftToggle = Digital("left_toggle");
+        var rightToggle = Digital("right_toggle");
+        bool available = thrust.bActive && (leftToggle.bActive || rightToggle.bActive) && tracked;
+        var stick = new System.Numerics.Vector2(thrust.x, thrust.y);
+        bool held = leftToggle.bActive && leftToggle.bState || rightToggle.bActive && rightToggle.bState;
+        bool neutral = available && !held && float.IsFinite(stick.X) && float.IsFinite(stick.Y)
+            && MathF.Abs(stick.Y) <= 0.15f && lastFrame.Left.Drag == 0 && lastFrame.Right.Drag == 0
+            && lastFrame.Left.Turn == 0 && lastFrame.Right.Turn == 0
+            && lastFrame.Left.DpadDown == 0 && lastFrame.Right.DpadDown == 0;
+        bool suspended = pilotGate.Update(pilotRequested, dashboard, neutral);
+        lastFrame = lastFrame with
+        {
+            PilotStick = stick, PilotHeld = held,
+            PilotAvailable = pilotRequested && available && !suspended,
+            MotionSuspended = suspended
+        };
         return lastFrame;
     }
 
@@ -82,6 +112,19 @@ internal sealed class OpenVrSession : IOpenVrSession
         InputDigitalActionData_t data = default;
         Check(input.GetDigitalActionData(handles[name], ref data, (uint)Marshal.SizeOf<InputDigitalActionData_t>(), 0), name);
         return data;
+    }
+
+    public void SetPilotInputEnabled(bool enabled)
+    {
+        if (enabled && !pilotRequested)
+        {
+            var settings = Vr.Settings ?? throw new InvalidOperationException("SteamVR Settings が利用できません。");
+            EVRSettingsError error = EVRSettingsError.None;
+            bool allowed = settings.GetBool("steamvr", "globalActionSetPriority", ref error);
+            if (error != EVRSettingsError.None || !allowed)
+                throw new InvalidOperationException("頭部操縦には SteamVR 開発者設定の Experimental overlay input overrides を有効にしてください。");
+        }
+        pilotRequested = enabled;
     }
 
     public void PreviewStanding(RigidPose standingToRaw)

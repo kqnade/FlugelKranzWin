@@ -2,7 +2,7 @@ using FlugelKranz.Core;
 
 namespace FlugelKranz.OpenVR;
 
-public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider, IFlightBindings
+public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetProvider, IFlightBindings, IFlightInputControl
 {
     private readonly IOpenVrSession session;
     private readonly IDriverConnection driver;
@@ -42,8 +42,12 @@ public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
             bool tracked = raw.Tracked && hand.IsTracked;
             return hand with { Pose = rawToPhysical * raw.Pose, IsTracked = tracked };
         }
-        return new(rawToPhysical * head.Pose, head.Tracked && input.HeadTracked,
-            ReadHand(input.Left, left), ReadHand(input.Right, right));
+        return input with
+        {
+            Head = rawToPhysical * head.Pose,
+            HeadTracked = head.Tracked && input.HeadTracked,
+            Left = ReadHand(input.Left, left), Right = ReadHand(input.Right, right)
+        };
     }
 
     public void Apply(RigidPose offset)
@@ -55,6 +59,7 @@ public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
         CurrentOffset = offset;
     }
 
+    public void SetPilotInputEnabled(bool enabled) => session.SetPilotInputEnabled(enabled);
     public void Restore() => Apply(OriginalOffset);
     public void OpenBindings() => session.OpenBindings();
     public void Dispose()

@@ -8,7 +8,11 @@
       "language_tag": "en_US",
       "/actions/flight/in/left_reset_hold": "left reset_hold",
       "/actions/flight": "FlugelKranz movement",
-      "/actions/flight/in/left_drag": "left drag"
+      "/actions/flight/in/left_drag": "left drag",
+      "/actions/pilot": "Head pilot (experimental)",
+      "/actions/pilot/in/thrust": "View-relative thrust",
+      "/actions/pilot/in/left_toggle": "Head pilot toggle / hold to reset inertia",
+      "/actions/pilot/in/right_toggle": "Head pilot toggle / hold to reset inertia"
     }
   ],
   "default_bindings": [
@@ -51,11 +55,30 @@
       "type": "boolean",
       "requirement": "optional",
       "name": "/actions/flight/in/right_reset_hold"
+    },
+    {
+      "name": "/actions/pilot/in/thrust",
+      "type": "vector2",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/pilot/in/left_toggle",
+      "type": "boolean",
+      "requirement": "optional"
+    },
+    {
+      "name": "/actions/pilot/in/right_toggle",
+      "type": "boolean",
+      "requirement": "optional"
     }
   ],
   "action_sets": [
     {
       "name": "/actions/flight",
+      "usage": "leftright"
+    },
+    {
+      "name": "/actions/pilot",
       "usage": "leftright"
     }
   ]

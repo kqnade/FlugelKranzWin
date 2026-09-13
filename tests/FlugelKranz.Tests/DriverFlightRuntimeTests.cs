@@ -7,6 +7,18 @@ namespace FlugelKranz.Tests;
 
 public class DriverFlightRuntimeTests
 {
+    [Fact]
+    public void PhysicalConversionPreservesPilotAndDashboardInputs()
+    {
+        var session = new Session();
+        session.Frame = session.Frame with { PilotAvailable = true, PilotHeld = true,
+            PilotStick = new(0.2f,0.7f), MotionSuspended = true };
+        using var runtime = new DriverFlightRuntime(session, () => new Driver());
+        var result = runtime.ReadPhysical();
+        Assert.True(result.PilotAvailable && result.PilotHeld && result.MotionSuspended);
+        Assert.Equal(session.Frame.PilotStick, result.PilotStick);
+    }
+
     [Theory]
     [InlineData(1, 0, 0)]
     [InlineData(0, 1, 0)]

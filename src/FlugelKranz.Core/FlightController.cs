@@ -12,6 +12,11 @@ public interface IFlightRuntime : IDisposable
     void Restore();
 }
 
+public interface IFlightInputControl
+{
+    void SetPilotInputEnabled(bool enabled);
+}
+
 public interface IReferenceSpaceOffsetProvider
 {
     RigidPose ReferenceSpaceOffset { get; }
@@ -104,6 +109,13 @@ public sealed class FlightController(
             int tick = 0;
             while (!shutdown.IsCancellationRequested)
             {
+                lock (gate)
+                {
+                    var inputSettings = (getSettings?.Invoke() ?? FlugelKranzSettings.Default).Normalized();
+                    (runtime as IFlightInputControl)?.SetPilotInputEnabled(enabled &&
+                        (inputModeOverride ?? inputSettings.Mode) == FlightMode.FreeFlight &&
+                        inputSettings.FreeFlight.HeadPilotEnabled);
+                }
                 var frame = runtime.ReadPhysical();
                 long timestamp = Stopwatch.GetTimestamp();
                 float elapsedSeconds = (float)Stopwatch.GetElapsedTime(previousTimestamp, timestamp).TotalSeconds;
@@ -114,7 +126,7 @@ public sealed class FlightController(
                 FlightMode selectedMode = inputModeOverride ?? settings.Mode;
                 reportedMode = selectedMode;
 
-                DpadHold currentDpadHold = GetDpadHold(frame);
+                DpadHold currentDpadHold = frame.MotionSuspended ? DpadHold.None : GetDpadHold(frame);
                 if (currentDpadHold != dpadHold)
                 {
                     dpadHold = currentDpadHold;
@@ -170,7 +182,7 @@ public sealed class FlightController(
                         appliedMode = selectedMode;
                         resetRequested = false;
                     }
-                    if (enabled)
+                    if (enabled && !frame.MotionSuspended)
                     {
                         if (spaceResetTransition is not null &&
                             spaceResetTransition.Mode != selectedMode)
@@ -271,13 +283,16 @@ public sealed class FlightController(
                             : infiniteWalking.IsDragging;
                         bool turning = transitioning ? false
                             : selectedMode == FlightMode.FreeFlight
-                            ? freeFlight.IsTurning
+                            ? freeFlight.IsTurning || freeFlight.IsHeadPiloting
                             : infiniteWalking.IsTurning;
                         string message = !enabled ? "オフ — 現在の位置・姿勢を保持しています。"
+                            : frame.MotionSuspended ? "操作を一時停止中 — ダッシュボードを閉じ、スティックと操作ボタンを戻してください。"
                             : modeTransition is not null ? "無限歩行モードへ戻しています…"
                             : spaceResetTransition is not null ? SpaceResetMessage(selectedMode)
                             : !frame.HeadTracked ? "HMD のトラッキングを待っています。"
                             : !frame.Left.IsTracked || !frame.Right.IsTracked ? "コントローラーの姿勢・操作入力を待っています。"
+                            : selectedMode == FlightMode.FreeFlight && settings.FreeFlight.HeadPilotEnabled
+                                ? freeFlight.IsHeadPiloting ? "頭部操縦 ON — X/A で OFF、長押しで慣性リセット。" : "頭部操縦 OFF — X/A で ON、左スティックで推進。"
                             : "オン — 操作入力を一度離してから使用してください。";
                         var referenceSpaceOffset = (runtime as IReferenceSpaceOffsetProvider)
                             ?.ReferenceSpaceOffset;

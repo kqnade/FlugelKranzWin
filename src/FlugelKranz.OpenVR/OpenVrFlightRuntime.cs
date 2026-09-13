@@ -9,6 +9,7 @@ public interface IOpenVrSession : IDisposable
     InputFrame ReadRaw();
     void PreviewStanding(RigidPose standingToRaw);
     void HidePreview();
+    void SetPilotInputEnabled(bool enabled) { }
     string DescribeInput() => "";
     void OpenBindings() => throw new NotSupportedException();
     (uint Left, uint Right) ControllerDevices() => (uint.MaxValue, uint.MaxValue);

@@ -125,3 +125,15 @@ ctest --test-dir artifacts/driver-build -C Release --output-on-failure
 C# テストは入力、座標合成、慣性、モード切替、追跡喪失、復元、設定、UI を検証します。ネイティブテストは姿勢・速度の変換、恒等変換時のパススルー、レイヤー情報の保持、フレーム姿勢の補間・予測を検証します。自動テストの成功と実機での表示品質は区別してください。
 
 Windows UI は `UseWin32()`、入力と接続は `FlugelKranz.OpenVR`、操作計算は `FlugelKranz.Core`、姿勢適用とフレーム補正は `native/driver` が担当します。上流由来の OpenXR / Monado プロジェクトは依存関係・参照用として残っていますが、ここで Linux の導入・開発を扱うものではありません。
+
+## 頭部操縦試作の実行
+
+`feat/head-steered-flight` の試作アプリは既存の登録済みドライバーへ接続します。DLL は変更しません。別フォルダーへのアプリ発行は次のコマンドです。
+
+```powershell
+dotnet publish src/FlugelKranz -c Release -r win-x64 --self-contained true -o artifacts/head-pilot-windows-x64
+```
+
+通常版の FlugelKranz を終了してから、このフォルダーのアプリを起動します。同じアプリキーを使うため、SteamVR のアクション manifest 登録は最後に起動した版のパスになります。通常版へ戻す場合は通常版を起動し直してください。
+
+SteamVR 開発者設定の `Experimental overlay input overrides` を有効にし、アプリの F モード設定で頭部操縦を有効にします。プログラムはこのグローバル設定を自動変更しません。入力が待機したままの場合は `/actions/pilot` の左スティック推進と X / A 切替の割当を確認してください。操作仕様と未確認事項は [README](README.md#頭部操縦の試作windows--f-モード) を参照してください。
