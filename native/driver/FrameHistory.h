@@ -57,6 +57,15 @@ public:
         lastTick=tick;
         entries[next]={tick,output,transform,original?*original:vr::DriverPose_t{},original!=nullptr};next=(next+1)%entries.size();count=std::min(count+1,entries.size());
     }
+    bool canBypassCorrection(double now) const {
+        // Keep correcting late virtual frames until the supported history window
+        // contains only identity output. Then preserve the HMD driver's prediction.
+        return count && std::isfinite(now) && now>=lastTick && now-lastTick<=50
+            && lastTick-heldSince>=250
+            && heldTransform.x==0 && heldTransform.y==0 && heldTransform.z==0
+            && std::abs(heldTransform.w)==1
+            && heldTransform.px==0 && heldTransform.py==0 && heldTransform.pz==0;
+    }
     PhysicalFrame physicalAt(double now,float prediction) const {
         // SubmitLayer specifies when this frame's HMD pose was predicted to.
         // Use that time to recover the physical pose, independently of flight.

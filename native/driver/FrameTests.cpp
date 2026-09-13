@@ -78,5 +78,19 @@ int main() {
     history.clear();
     history.add(1000,oldOutput,old);
     check(!history.physicalAt(1010,0).found,"time path requires original physical sample, never transformed output");
+    history.clear();
+    check(!history.canBypassCorrection(1000),"empty history does not assert identity");
+    for(int t=1000;t<=1300;t+=10) history.add(t,p,flight::Pose{},&p);
+    check(history.canBypassCorrection(1300),"settled identity bypasses physical pose replacement");
+    check(!history.canBypassCorrection(1400),"stale identity is not assumed current");
+    history.add(1310,oldOutput,old,&p);
+    check(!history.canBypassCorrection(1310),"new flight rotation immediately disables bypass");
+    for(int t=1320;t<=1560;t+=10) history.add(t,p,flight::Pose{},&p);
+    check(!history.canBypassCorrection(1560),"reset still corrects delayed flight frames for 250ms");
+    history.add(1570,p,flight::Pose{},&p);
+    check(history.canBypassCorrection(1570),"reset eventually returns untouched frame metadata");
+    auto translated=flight::Pose{};translated.px=1;
+    for(int t=1580;t<=1900;t+=10) history.add(t,flight::apply(p,translated),translated,&p);
+    check(!history.canBypassCorrection(1900),"translation-only flight still needs correction");
     std::puts("Frame inverse, delayed commands, prediction, ambiguity and expiration: passed");
 }

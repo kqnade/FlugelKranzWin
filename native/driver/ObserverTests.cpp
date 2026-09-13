@@ -74,5 +74,17 @@ int main() {
     observedSubmit(expectedSelf,eyes);
     require(forwarded==6 && inFlight==0);
     require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
+    // Identity must preserve even a render pose that differs from our own
+    // prediction: forward the exact original pointer and bytes.
+    frameHistory.clear();
+    const double resetNow=frameTimeMs();
+    for(int dt=300;dt>=0;dt-=10) frameHistory.add(resetNow-dt,head,flight::Pose{},&head);
+    expectCopy=false;
+    std::memcpy(expectedCopy,eyes,sizeof(eyes));
+    auto missedBefore=missedLayers.load();
+    observedSubmit(expectedSelf,eyes);
+    require(forwarded==7 && inFlight==0);
+    require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
+    require(missedLayers.load()==missedBefore);
     std::puts("Observer forwards original layers and ignores unavailable/unsupported interfaces: passed");
 }

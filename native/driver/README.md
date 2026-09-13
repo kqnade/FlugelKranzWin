@@ -105,3 +105,7 @@ MSVC x64、Windows SDK、CMake、.NET 10 が必要です。`transform_tests`、`
 
 - OpenVR header / license：ValveSoftware/openvr `0924064316de3effbcd1acf1e309182a2deb1c05`。
 - MinHook source / build files：TsudaKageyu/minhook `8af6b4acae5a9388fd742b56fa79ece89d96f823`。
+
+## 恒等変換時のパススルー
+
+飛行変換が連続 250 ms 以上ゼロで、最新 HMD サンプルが 50 ms 以内なら、フレーム姿勢を独自予測で置き換えず元のレイヤーをそのまま転送します。リセット直後は遅れた飛行フレームに対応するため補正を継続します。ログの `identityBypass=1` はこのパススルーを示し、未補正エラー数には含めません。OFF は変換を保持するため、OFF だけでこの条件になるとは限りません。この修正によるふらつき改善は実機未確認です。

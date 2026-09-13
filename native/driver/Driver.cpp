@@ -73,10 +73,14 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
     flight::FrameMatch match;
     flight::PhysicalFrame physicalLeft,physicalRight;
     Layer corrected[2];
+    bool identityBypass=false;
     if(correctFramePose) {
         std::lock_guard<std::mutex> lock(historyGate);
         auto frameNow=frameTimeMs();
-        if(timeBasedFramePose) {
+        identityBypass=frameHistory.canBypassCorrection(frameNow);
+        if(identityBypass) {
+            // Forward the original layer below without copying or predicting it.
+        } else if(timeBasedFramePose) {
             physicalLeft=frameHistory.physicalAt(frameNow,prediction);
             physicalRight=frameHistory.physicalAt(frameNow,eyes[1].flHmdPosePredictionTimeInSecondsFromNow);
             match.found=physicalLeft.found && physicalRight.found;
@@ -97,17 +101,17 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
         submitOriginal(self,corrected);
     } else submitOriginal(self,eyes);
     submittedLayers.fetch_add(1);
-    if(correctFramePose && !match.found) missedLayers.fetch_add(1);
+    if(correctFramePose && !identityBypass && !match.found) missedLayers.fetch_add(1);
     if(match.held && match.found) heldLayers.fetch_add(1);
     if(log) {
         char message[1400];
         std::snprintf(message,sizeof(message),
-            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f timed=%d physicalDt=%.6f layers=%llu missed=%llu held=%llu "
+            "FrameAudit t=%llu sampled=%d headAge=%lld prediction=%.6f corrected=%d matchError=%.6f timed=%d identityBypass=%d physicalDt=%.6f layers=%llu missed=%llu held=%llu "
             "layer=[%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f;%.6f %.6f %.6f %.6f] "
             "commandQxyzw=[%.6f %.6f %.6f %.6f] commandP=[%.6f %.6f %.6f] "
             "physicalQxyzw=[%.6f %.6f %.6f %.6f] physicalP=[%.6f %.6f %.6f]",
             static_cast<unsigned long long>(now),sampled?1:0,
-            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,timeBasedFramePose?1:0,physicalLeft.predictionSeconds,
+            headTime?static_cast<long long>(now)-static_cast<long long>(headTime):-1LL,prediction,match.found?1:0,match.error,timeBasedFramePose?1:0,identityBypass?1:0,physicalLeft.predictionSeconds,
             static_cast<unsigned long long>(submittedLayers.exchange(0)),
             static_cast<unsigned long long>(missedLayers.exchange(0)),
             static_cast<unsigned long long>(heldLayers.exchange(0)),
