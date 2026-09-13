@@ -3,9 +3,19 @@
 Windows x64 server driver. Based on the driver-pose interception approach explored
 by [Kawaii Move Assist](https://github.com/ReinaS-64892/reina_s_kawaii_move_assist).
 This implementation installs MinHook detours on the pose-update entry points of
-IVRServerDriverHost_005 / _006, then composes the commanded rigid transform into
-`qWorldFromDriverRotation` and `vecWorldFromDriverTranslation`. Local body poses,
-head calibration and driver-space velocities are preserved.
+IVRServerDriverHost_005 / _006, then bakes the original world-from-driver transform
+and commanded flight transform into `qRotation` and `vecPosition`, following
+Kawaii Move Assist's world-space body-pose representation. World-from-driver is
+then identity. Linear and angular derivatives are rotated into the same space;
+body-local head calibration and pose timing are preserved. Identity commands pass
+the original driver pose through unchanged, including its original calibration.
+
+The previous implementation changed world-from-driver instead of the body pose.
+Quest 2 / Virtual Desktop testing reported black borders persisting after flight
+rotation and disappearing on reset. The v2 body-pose change corrects the difference
+from the reference implementation; whether it resolves that rendering symptom
+still requires hardware testing. Neither VD nor SteamVR is established as the
+cause. Tests verify the pose representation, not rendered headset images.
 
 No Chaperone setters are used. Original device poses are published before the
 flight transform, avoiding transformed-pose feedback into the C# motion engine.

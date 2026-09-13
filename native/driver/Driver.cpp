@@ -95,7 +95,7 @@ public:
             installed++;
         }
         if(!installed) {Cleanup();return vr::VRInitError_Driver_Failed;}
-        vr::VRDriverLog()->Log("FlugelKranz driver ready: raw snapshots + XYZ world-from-driver transforms");
+        vr::VRDriverLog()->Log("FlugelKranz driver ready: raw snapshots + XYZ body-pose transforms v2");
         return vr::VRInitError_None;
     }
     void Cleanup() override {

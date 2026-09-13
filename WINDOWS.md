@@ -64,7 +64,9 @@ SteamVRのアドオン管理でドライバーを無効化した場合は、ON�
   ドライバーのpose-updateフック方式を参照。固定X+5mの試作ドライバーそのものは導入しません。
 
 新しいドライバーはIVRServerDriverHost_005 / _006のpose updateへフックし、
-HMD・手・トラッカーのworld-from-driver変換に全軸変換を合成します。
+HMD・手・トラッカーの元のworld-from-driver変換と飛行変換を、位置・向きへ合成して
+書き戻します。world-from-driverは恒等変換にし、速度・角速度も同じ座標系へ回転します。
+↻で恒等変換へ戻した場合は、元のドライバー姿勢をそのまま通します。
 Chaperoneは書き換えません。変更前の物理姿勢を共有メモリーへ保存し、
 それをアプリの操作計算へ渡すため、飛行結果を入力へ戻す循環はありません。
 
@@ -86,9 +88,13 @@ ctest --test-dir artifacts/driver-build -C Release --output-on-failure
 
 C#では全軸の座標合成、入力への二重適用防止、復元、接続失敗、追跡喪失、
 Chaperoneが回転を拒否する場合の明示エラーを検証します。
-C++ではXYZ変換とdriver-space速度の維持を検証します。
+C++ではXYZのbody poseへの書き戻し、非可換な回転の合成順序、速度・角速度の
+座標系、頭部補正の保持、恒等変換時の完全なパススルーを検証します。
 以前のChaperone版ではQuest 2 + Touch / Virtual Desktopの入力取得に成功しています。
-新ドライバーの実機フック・head calibrationの合成・VRChatでの全軸回転は導入後の確認が必要です。
+初期ドライバーはロード・追跡取得を確認しましたが、回転後に黒い縁が残り、↻で消える
+不具合が報告されました。v2はkawaii move assistとの適用先の違いを修正した検証候補です。
+表示不具合の解消・head calibrationの合成・VRChatでの全軸回転は実機確認が必要です。
+SteamVRログの `XYZ body-pose transforms v2` で新DLLのロードを識別できます。
 
 実機では、最初にOFFのまま診断し、HMD・両手を確認します。その後、小さい移動と
 各軸の回転、ボタン解放、OFF、↻、終了復元を確認します。他のposeフック系ツールとの

@@ -21,14 +21,26 @@ inline bool valid(Pose p) {
         &&std::abs(p.x*p.x+p.y*p.y+p.z*p.z+p.w*p.w-1)<0.0001;
 }
 inline vr::DriverPose_t apply(vr::DriverPose_t p, Pose transform) {
+    // Reset / disconnected client: preserve the original driver's representation.
+    if(transform.x==0 && transform.y==0 && transform.z==0 && std::abs(transform.w)==1
+        && transform.px==0 && transform.py==0 && transform.pz==0) return p;
     vr::HmdQuaternion_t q{transform.w,transform.x,transform.y,transform.z};
+    auto bodyToWorld=multiply(q,p.qWorldFromDriverRotation);
     double t[3]; rotate(q,p.vecWorldFromDriverTranslation,t);
-    p.qWorldFromDriverRotation=multiply(q,p.qWorldFromDriverRotation);
-    p.vecWorldFromDriverTranslation[0]=t[0]+transform.px;
-    p.vecWorldFromDriverTranslation[1]=t[1]+transform.py;
-    p.vecWorldFromDriverTranslation[2]=t[2]+transform.pz;
-    // Body pose, head/IMU calibration and velocities stay in driver coordinates.
-    // The runtime applies the changed world-from-driver transform to all of them.
+    // Follow Kawaii Move Assist's world-space body-pose representation. Putting
+    // flight into world-from-driver instead changes calibration metadata as well.
+    rotate(bodyToWorld,p.vecPosition,p.vecPosition);
+    p.vecPosition[0]+=t[0]+transform.px;
+    p.vecPosition[1]+=t[1]+transform.py;
+    p.vecPosition[2]+=t[2]+transform.pz;
+    p.qRotation=multiply(bodyToWorld,p.qRotation);
+    rotate(bodyToWorld,p.vecVelocity,p.vecVelocity);
+    rotate(bodyToWorld,p.vecAcceleration,p.vecAcceleration);
+    rotate(bodyToWorld,p.vecAngularVelocity,p.vecAngularVelocity);
+    rotate(bodyToWorld,p.vecAngularAcceleration,p.vecAngularAcceleration);
+    p.qWorldFromDriverRotation={1,0,0,0};
+    for(auto& value:p.vecWorldFromDriverTranslation) value=0;
+    // Head/IMU calibration stays body-local. Pose prediction timing is unchanged.
     return p;
 }
 inline Pose physical(const vr::DriverPose_t& p) {
