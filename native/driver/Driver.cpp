@@ -175,6 +175,10 @@ bool enter() {
 void refresh() {
     auto now=GetTickCount64();
     if (state && enter()) {
+        // The client may publish a newer heartbeat while we wait for the
+        // mutex. Compare it with a clock sampled inside the same lock, or
+        // the future-time check can revoke a healthy owner and reset Drag.
+        now=GetTickCount64();
         state->driverHeartbeat=now;
         if(state->owner && (now<state->clientHeartbeat || now-state->clientHeartbeat>=500)) {
             state->owner=0;state->enabled=0;

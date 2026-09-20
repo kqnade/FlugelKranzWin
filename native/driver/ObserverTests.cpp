@@ -1,5 +1,17 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+// Model a heartbeat written while refresh is waiting for the IPC mutex.
+static bool scriptedClock=false;
+static unsigned clockReads=0;
+static ULONGLONG WINAPI testTickCount64() {
+    if (!scriptedClock) return ::GetTickCount64();
+    return clockReads++ == 0 ? 1000 : 1016;
+}
+#define GetTickCount64 testTickCount64
 // Include the actual callbacks to test forwarding without starting SteamVR.
 #include "Driver.cpp"
+#undef GetTickCount64
 #include <cstdlib>
 #include <limits>
 namespace {
@@ -23,6 +35,34 @@ void* forwardedComponent(void* self,const char*) {
 }
 }
 int main() {
+    flight::State shared{};
+    state=&shared;
+    ipcMutex=CreateMutexW(nullptr,FALSE,nullptr);
+    require(ipcMutex!=nullptr);
+    shared.owner=123;
+    shared.enabled=1;
+    shared.clientHeartbeat=1016;
+    shared.command.px=3;
+    scriptedClock=true;
+    refresh();
+    // A fresh heartbeat newer than the pre-lock clock must not revoke the
+    // owner or drop a held Drag offset to the identity transform.
+    require(shared.owner==123 && shared.enabled==1);
+    require(command.px==3 && lastHeartbeat==1016);
+    require(shared.driverHeartbeat==1016);
+    // The stale-client fail-safe remains active at the original boundary.
+    shared.clientHeartbeat=517; // 499 ms old at the locked clock sample
+    refresh();
+    require(shared.owner==123 && command.px==3);
+    shared.clientHeartbeat=516; // 500 ms old
+    refresh();
+    require(shared.owner==0 && shared.enabled==0 && command.px==0);
+    shared.owner=123;shared.enabled=1;shared.clientHeartbeat=1017;
+    refresh(); // a genuinely future timestamp is still rejected
+    require(shared.owner==0 && shared.enabled==0 && command.px==0);
+    scriptedClock=false;
+    CloseHandle(ipcMutex);ipcMutex=nullptr;state=nullptr;
+    command={};lastHeartbeat=0;
     Layer eyes[2]{};
     eyes[0].hTexture=12;eyes[1].hTexture=34;
     eyes[0].mHmdPose.m[0][0]=1;
