@@ -38,6 +38,9 @@ public sealed class FreeFlightManipulator
     private float dragBrakeFactor = 1, turnBrakeFactor = 1;
     private Quaternion turnAnchor, turnStartOrientation, turnStartOffsetOrientation;
     private Vector3 twoHandTurnAxis;
+    private Vector3 twoHandTurnPivot;
+    private Quaternion previousTwoHandOrientation;
+    private bool useTwoHandTurnPivotForInertia;
     private Vector3 angularInertia, turnVelocity;
     private RigidPose previousTurnTarget;
     private float linearExemptionSeconds, angularExemptionSeconds;
@@ -58,7 +61,9 @@ public sealed class FreeFlightManipulator
         targetOffset = Offset;
         linearInertia = dragVelocity = angularInertia = turnVelocity = Vector3.Zero;
         dragReferenceOrientation = turnStartOrientation = turnStartOffsetOrientation = Quaternion.Identity;
-        dragAnchorInRoot = previousDragPosition = twoHandTurnAxis = Vector3.Zero;
+        dragAnchorInRoot = previousDragPosition = twoHandTurnAxis = twoHandTurnPivot = Vector3.Zero;
+        previousTwoHandOrientation = Quaternion.Identity;
+        useTwoHandTurnPivotForInertia = false;
         positionTargetUsesDragSmoothing = false;
         dragAccelerationBoostActive = false;
         dragBrakeElapsed = turnBrakeElapsed = 0;
@@ -137,6 +142,7 @@ public sealed class FreeFlightManipulator
         }
         if (previousTurnHands != 0 && turnHands == 0)
         {
+            useTwoHandTurnPivotForInertia = previousTurnHands == BothHands;
             if (HandsUsable(frame, previousTurnHands))
                 FinishTurn(settings);
             else
@@ -161,6 +167,14 @@ public sealed class FreeFlightManipulator
             angularExemptionSeconds = 0;
             turnBrakeElapsed = 0;
             turnBrakeFactor = 1;
+        }
+
+        if (!IsDragging && !IsTurning)
+        {
+            // Smoothing may leave the presented offset behind targetOffset when
+            // a grip is released. Start inertia from what is actually visible
+            // instead of snapping to the unapplied target first.
+            targetOffset = Offset;
         }
 
         bool activeHandsChanged =
@@ -315,6 +329,13 @@ public sealed class FreeFlightManipulator
         twoHandTurnAxis = turnHands == BothHands
             ? SafeDirection(frame.Right.Pose.Position - frame.Left.Pose.Position)
             : Vector3.Zero;
+        twoHandTurnPivot = turnHands == BothHands
+            ? HandPosition(frame, BothHands)
+            : Vector3.Zero;
+        previousTwoHandOrientation = turnHands == BothHands
+            ? HandOrientation(frame, BothHands)
+            : Quaternion.Identity;
+        useTwoHandTurnPivotForInertia = turnHands == BothHands;
         turnVelocity = Vector3.Zero;
         previousTurnTarget = targetOffset;
     }
@@ -462,24 +483,45 @@ public sealed class FreeFlightManipulator
 
     private Quaternion TurnTargetOrientation(InputFrame frame)
     {
-        Quaternion current = HandOrientation(frame, turnHands);
         if (turnHands != BothHands)
-            return Quaternion.Normalize(turnAnchor * Quaternion.Conjugate(current));
+        {
+            Quaternion singleHandOrientation = HandOrientation(frame, turnHands);
+            return Quaternion.Normalize(turnAnchor * Quaternion.Conjugate(singleHandOrientation));
+        }
 
-        Vector3 currentAxis = SafeDirection(frame.Right.Pose.Position - frame.Left.Pose.Position);
-        Vector3 axis = currentAxis.LengthSquared() > 0 ? currentAxis : twoHandTurnAxis;
+        Quaternion current = HandOrientation(frame, BothHands);
+        if (Quaternion.Dot(current, previousTwoHandOrientation) < 0)
+            current = -current;
+
+        // Keep the pole axis captured at the moment both hands start turning.
+        // Reprojecting the accumulated pose onto a moving hand line can turn
+        // tracking noise or a large pose change into an unintended spin.
+        Vector3 axis = twoHandTurnAxis;
         if (axis.LengthSquared() <= 0)
+        {
+            previousTwoHandOrientation = current;
             return turnStartOffsetOrientation;
+        }
 
-        Quaternion controllerDelta = Quaternion.Normalize(current * Quaternion.Conjugate(turnStartOrientation));
-        Quaternion twist = TwistAroundAxis(controllerDelta, axis);
-        return Quaternion.Normalize(turnStartOffsetOrientation * Quaternion.Conjugate(twist));
+        Quaternion controllerDelta = Quaternion.Normalize(current * Quaternion.Conjugate(previousTwoHandOrientation));
+        float twistAngle = RotationAngleAroundAxis(controllerDelta, axis);
+        previousTwoHandOrientation = current;
+        if (MathF.Abs(twistAngle) > 0)
+        {
+            Quaternion inverseTwist = Quaternion.CreateFromAxisAngle(axis, -twistAngle);
+            turnStartOffsetOrientation = Quaternion.Normalize(
+                turnStartOffsetOrientation * inverseTwist);
+        }
+        return turnStartOffsetOrientation;
     }
 
     private Vector3 TurnPivot(InputFrame frame, FlightMotionSettings settings)
     {
         if (IsDragging)
             return HandPosition(frame, dragHands);
+        if (turnHands == BothHands ||
+            (turnHands == 0 && useTwoHandTurnPivotForInertia && angularInertia.LengthSquared() > 0))
+            return twoHandTurnPivot;
         if (settings.TurnOrigin == TurnOrigin.Head)
             return frame.Head.Position;
 
@@ -568,7 +610,10 @@ public sealed class FreeFlightManipulator
             (!settings.InertiaCutoffEnabled || dragVelocity.Length() >= settings.DragCutoffMetresPerSecond);
         if (hasUsableAcceleration)
         {
-            var acceleration = ApplyDragAcceleration(dragVelocity, head.Orientation, settings);
+            // dragVelocity is in root space. Apply the reference-space rotation
+            // to the physical HMD orientation before comparing their directions.
+            var headInRoot = Quaternion.Normalize(Offset.Orientation * head.Orientation);
+            var acceleration = ApplyDragAcceleration(dragVelocity, headInRoot, settings);
             float speedBeforeBoost = linearInertia.Length();
             if (dragAccelerationBoostActive && speedBeforeBoost > 0.0000000001f)
             {
@@ -683,6 +728,7 @@ public sealed class FreeFlightManipulator
         turnBrakeElapsed = 0;
         turnBrakeFactor = 1;
         angularExemptionSeconds = 0;
+        useTwoHandTurnPivotForInertia = false;
     }
 
     internal static Quaternion IntegrateRotation(Quaternion rotation, Vector3 velocity, float dt)
@@ -719,6 +765,25 @@ public sealed class FreeFlightManipulator
         return twist.LengthSquared() <= 0.0000000001f
             ? Quaternion.Identity
             : Quaternion.Normalize(twist);
+    }
+
+    private static float RotationAngleAroundAxis(Quaternion rotation, Vector3 axis)
+    {
+        axis = SafeDirection(axis);
+        if (axis.LengthSquared() <= 0)
+            return 0;
+
+        rotation = Quaternion.Normalize(rotation);
+        if (rotation.W < 0)
+            rotation = -rotation;
+
+        var imaginary = new Vector3(rotation.X, rotation.Y, rotation.Z);
+        float imaginaryLength = imaginary.Length();
+        if (imaginaryLength <= 0.0000001f)
+            return 0;
+
+        float angle = 2 * MathF.Atan2(imaginaryLength, MathF.Max(0, rotation.W));
+        return Vector3.Dot(imaginary / imaginaryLength * angle, axis);
     }
 
     private static Quaternion HandOrientation(InputFrame frame, byte hands) => hands switch

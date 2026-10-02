@@ -2,5 +2,15 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "description": "Avalonia.Headless.XUnit 12.1.2 uses xUnit v3 APIs; validate compatibility before adopting xUnit 4.",
+      "matchPackageNames": [
+        "xunit.v3",
+        "xunit.runner.visualstudio"
+      ],
+      "allowedVersions": "<4"
+    }
   ]
 }
