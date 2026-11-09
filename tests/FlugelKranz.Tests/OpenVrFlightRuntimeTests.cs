@@ -157,13 +157,38 @@ public class OpenVrFlightRuntimeTests
         Assert.Equal(1, session.Hides);
     }
 
+    [Fact]
+    public void ReadsCheckTheOriginEvery100MillisecondsButApplyAlwaysChecks()
+    {
+        var session = new FakeSession();
+        var time = new DriverFlightRuntimeTests.ManualTime();
+        using var runtime = new OpenVrFlightRuntime(session, time);
+        runtime.ReadPhysical();
+        int reads = session.StandingReads;
+        for (int tick = 0; tick < 30; tick++)
+        {
+            time.Advance(TimeSpan.FromMilliseconds(3));
+            runtime.ReadPhysical();
+        }
+        Assert.Equal(reads, session.StandingReads);
+        time.Advance(TimeSpan.FromMilliseconds(10));
+        runtime.ReadPhysical();
+        Assert.Equal(reads + 1, session.StandingReads);
+
+        session.Standing = Pose(0, 0, 0, new(1, 0, 0));
+        runtime.ReadPhysical();
+        Assert.Throws<InvalidOperationException>(() => runtime.Apply(RigidPose.Identity));
+        Assert.Equal(0, session.Writes);
+    }
+
     private sealed class FakeSession : IOpenVrSession
     {
         public RigidPose Standing = RigidPose.Identity;
         public InputFrame Frame = new(RigidPose.Identity, true, default, default);
         public int Writes, Hides;
         public bool Disposed, FailWrites, FlattenRotation;
-        public RigidPose ReadWorkingStanding() => Standing;
+        public int StandingReads;
+        public RigidPose ReadWorkingStanding() { StandingReads++; return Standing; }
         public InputFrame ReadRaw() => Frame;
         public void PreviewStanding(RigidPose pose)
         {

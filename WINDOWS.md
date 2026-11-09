@@ -141,3 +141,9 @@ SteamVR 開発者設定の `Experimental overlay input overrides` を有効に�
 ### VRChat 起動時の入力診断
 
 SteamVR の待機空間では移動できる一方、VRChat 内では動かないという報告があり、原因は調査中です。設定画面の入力診断には `requested`、`priority`、`dashboard`、`suspended`、`neutral`、`stickActive`、`y`、X/A の有効・押下状態、`scenePid` を表示します。SteamVR 待機空間と VRChat 内で比較し、送信中のオフセットも併せて確認してください。診断表示は姿勢変換や入力優先度を変更しません。
+
+## 2026-11-09 のドライバー修正について
+
+[Qwerty0525氏の派生版](https://github.com/Qwerty0525/FlugelKranzWin/tree/9ccd6912aa743089ca9cdf265f79849da06ebd83) から、SlimeVR/Rebocapへの飛行変換二重適用、IPC待ちによる姿勢更新遅延、原点確認ログの大量出力への修正を選択移植しました。移植時に読み戻しの世代照合を常時使用するよう調整し、古い更新の遅延完了・多数デバイスの同時更新に対する追加修正を行いました。原作者はhiyomi（Qwerty0525）氏、選択移植と追加修正はOpenAI Codexです。
+
+この変更は自動テストで検証していますが、この版のVR実機検証は未実施です。新しいドライバーDLLと同梱default.vrsettingsの両方が必要です。SteamVRの終了・更新・再起動は従来の導入手順に従って手動で行ってください。今回の作業では登録先のDLLや稼働中のSteamVRを変更していません。

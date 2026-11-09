@@ -3,6 +3,8 @@
     "loadPriority": 100,
     "observeFrames": true,
     "correctFramePose": true,
-    "timeBasedFramePose": true
+    "timeBasedFramePose": true,
+    "hmdAnchoredTrackingSystems": "",
+    "physicalPoseDrivers": "driver_slimevr.dll,driver_rebocap.dll"
   }
 }

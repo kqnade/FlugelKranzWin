@@ -7,6 +7,7 @@ public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
     private readonly IOpenVrSession session;
     private readonly IDriverConnection driver;
     private readonly RigidPose standing;
+    private readonly StandingOriginCheck originCheck;
     private bool disposed;
     public RigidPose OriginalOffset => RigidPose.Identity;
     public RigidPose CurrentOffset { get; private set; } = RigidPose.Identity;
@@ -14,9 +15,10 @@ public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
     public string InputDiagnostics => session.DescribeInput();
 
     public DriverFlightRuntime() : this(new OpenVrSession(), () => new DriverConnection()) { }
-    public DriverFlightRuntime(IOpenVrSession session, Func<IDriverConnection> connect)
+    public DriverFlightRuntime(IOpenVrSession session, Func<IDriverConnection> connect, TimeProvider? time = null)
     {
         this.session = session;
+        originCheck = new(time ?? TimeProvider.System);
         try
         {
             standing = session.ReadWorkingStanding();
@@ -30,7 +32,8 @@ public sealed class DriverFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         driver.Refresh();
-        if (!session.ReadWorkingStanding().NearlyEquals(standing))
+        // Every 100 ms, not every tick: each read makes SteamVR write a vrclient log line.
+        if (originCheck.Due() && !session.ReadWorkingStanding().NearlyEquals(standing))
             throw new InvalidOperationException("SteamVRの基準空間が変更されました。飛行変換を解除して再接続してください。");
         var input = session.ReadRaw();
         var (left, right) = session.ControllerDevices();

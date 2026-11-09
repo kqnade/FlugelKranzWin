@@ -20,6 +20,7 @@ public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
     private readonly IOpenVrSession session;
     private readonly RigidPose originalStanding;
     private RigidPose expectedStanding;
+    private readonly StandingOriginCheck originCheck;
     private bool previewOwned;
     private bool disposed;
 
@@ -31,9 +32,10 @@ public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
     public OpenVrFlightRuntime() : this(new OpenVrSession()) { }
     public void OpenBindings() => session.OpenBindings();
 
-    public OpenVrFlightRuntime(IOpenVrSession session)
+    public OpenVrFlightRuntime(IOpenVrSession session, TimeProvider? time = null)
     {
         this.session = session;
+        originCheck = new(time ?? TimeProvider.System);
         try
         {
             originalStanding = expectedStanding = session.ReadWorkingStanding();
@@ -51,7 +53,9 @@ public sealed class OpenVrFlightRuntime : IFlightRuntime, IReferenceSpaceOffsetP
 
     public InputFrame ReadPhysical()
     {
-        VerifyUnchanged();
+        // Rate limited like DriverFlightRuntime; Apply and Restore still check before writing.
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (originCheck.Due()) VerifyUnchanged();
         var raw = session.ReadRaw();
         var rawToPhysical = originalStanding.Inverse();
         return new(rawToPhysical * raw.Head, raw.HeadTracked,

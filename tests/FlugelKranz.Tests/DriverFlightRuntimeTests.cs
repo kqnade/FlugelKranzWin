@@ -79,11 +79,51 @@ public class DriverFlightRuntimeTests
     }
 
     [Fact]
+    public void StandingOriginIsCheckedAbout10TimesASecondNotEveryTick()
+    {
+        var session = new Session();
+        var time = new ManualTime();
+        using var runtime = new DriverFlightRuntime(session, () => new Driver(), time);
+        Assert.Equal(1, session.StandingReads);
+        runtime.ReadPhysical();
+        Assert.Equal(2, session.StandingReads);
+        // One second of 3 ms ticks reads the origin 10 times (was 333, each a vrclient log line).
+        for (int tick = 0; tick < 333; tick++)
+        {
+            time.Advance(TimeSpan.FromMilliseconds(3));
+            runtime.ReadPhysical();
+        }
+        Assert.InRange(session.StandingReads - 2, 9, 10);
+
+        // An external change is still caught, within 100 ms.
+        session.Standing = session.Standing with { Position = new(100, 0, 0) };
+        var caught = TimeSpan.Zero;
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            for (; caught < TimeSpan.FromSeconds(1); caught += TimeSpan.FromMilliseconds(3))
+            {
+                time.Advance(TimeSpan.FromMilliseconds(3));
+                runtime.ReadPhysical();
+            }
+        });
+        Assert.True(caught <= TimeSpan.FromMilliseconds(100), $"caught after {caught.TotalMilliseconds} ms");
+        Assert.Equal(0, session.Writes);
+    }
+
+    [Fact]
     public void StaleDriverSampleIsNotTracked()
     {
         var driver = new Driver { Tracked = false };
         using var runtime = new DriverFlightRuntime(new Session(), () => driver);
         Assert.False(runtime.ReadPhysical().HeadTracked);
+    }
+
+    internal sealed class ManualTime : TimeProvider
+    {
+        private long ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => ticks;
+        public void Advance(TimeSpan by) => ticks += by.Ticks;
     }
 
     private sealed class Driver : IDriverConnection
@@ -101,7 +141,8 @@ public class DriverFlightRuntimeTests
         public InputFrame Frame = new(RigidPose.Identity, true, new(RigidPose.Identity,1,0,0,true), new(RigidPose.Identity,0,1,0,true));
         public int Writes;
         public bool Disposed;
-        public RigidPose ReadWorkingStanding() => Standing;
+        public int StandingReads;
+        public RigidPose ReadWorkingStanding() { StandingReads++; return Standing; }
         public InputFrame ReadRaw() => Frame;
         public (uint Left,uint Right) ControllerDevices() => (1,2);
         public void PreviewStanding(RigidPose pose) { Writes++; }

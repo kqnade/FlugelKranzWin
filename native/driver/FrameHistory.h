@@ -34,6 +34,69 @@ inline vr::HmdMatrix34_t removeTransform(const vr::HmdMatrix34_t& rendered,Pose 
     }
     return result;
 }
+// Undo the flight on a pose read back from vrserver, for solvers that must see the body.
+inline void removeTransform(vr::TrackedDevicePose_t& pose,Pose transform) {
+    if(isIdentity(transform)) return;
+    pose.mDeviceToAbsoluteTracking=removeTransform(pose.mDeviceToAbsoluteTracking,transform);
+    const vr::HmdQuaternion_t inverse{transform.w,-transform.x,-transform.y,-transform.z};
+    for(auto* velocity:{&pose.vVelocity,&pose.vAngularVelocity}) {
+        const double in[3]{velocity->v[0],velocity->v[1],velocity->v[2]};
+        double out[3];rotate(inverse,in,out);
+        for(int i=0;i<3;i++) velocity->v[i]=static_cast<float>(out[i]);
+    }
+}
+// While a pose update is being forwarded, vrserver may still hold the pose flown with the
+// previous transform or already hold the new one. Pick the transform whose removal lands
+// nearer the physical position that update carries; the flight moves far more per update
+// than the body does.
+struct ReadbackPick {Pose transform;bool pending=false;double nearer=0,farther=0,residual=0;};
+inline ReadbackPick readbackPick(const vr::HmdMatrix34_t& readback,Pose previous,Pose pending,const double* physical) {
+    auto distance=[&](Pose transform) {
+        const auto unflown=removeTransform(readback,transform);
+        double sum=0;
+        for(int row=0;row<3;row++) {const double d=unflown.m[row][3]-physical[row];sum+=d*d;}
+        return std::sqrt(sum);
+    };
+    const double toPending=distance(pending),toPrevious=distance(previous);
+    return toPending<=toPrevious?ReadbackPick{pending,true,toPending,toPrevious,toPending}:ReadbackPick{previous,false,toPrevious,toPending,toPrevious};
+}
+// A transform vrserver may hold for a device, with the physical body pose its update carried.
+struct ReadbackCandidate {Pose transform,body;};
+// Distance from the readback with `transform` removed to `body`, position and orientation
+// both: 1 is about 5 mm or 0.6 degrees. Orientation tells candidates apart when a rotation
+// about the device itself (head-pilot turns about the HMD) leaves the positions equal.
+inline double readbackScore(const vr::HmdMatrix34_t& readback,Pose transform,Pose body,double* residual=nullptr) {
+    const auto unflown=removeTransform(readback,transform);
+    const auto expected=matrix(body);
+    double rotation=0,position=0;
+    for(int row=0;row<3;row++) {
+        for(int col=0;col<3;col++) {const double d=unflown.m[row][col]-expected.m[row][col];rotation+=d*d;}
+        const double d=unflown.m[row][3]-expected.m[row][3];position+=d*d;
+    }
+    if(residual) *residual=std::sqrt(position);
+    return std::sqrt(rotation/0.0002+position/0.000025);
+}
+// Candidates are oldest first; `pending` reports that the newest was picked. `farther` is
+// the best score among candidates with a different transform (0 if there is none).
+inline ReadbackPick pickReadback(const vr::HmdMatrix34_t& readback,const ReadbackCandidate* candidates,size_t count) {
+    ReadbackPick pick;
+    if(!count) return pick;
+    size_t best=0;double bestScore=0,bestResidual=0;
+    for(size_t i=0;i<count;i++) {
+        double residual;const double score=readbackScore(readback,candidates[i].transform,candidates[i].body,&residual);
+        if(i==0 || score<bestScore) {best=i;bestScore=score;bestResidual=residual;}
+    }
+    double second=0;bool haveSecond=false;
+    for(size_t i=0;i<count;i++) {
+        if(std::memcmp(&candidates[i].transform,&candidates[best].transform,sizeof(Pose))==0) continue;
+        const double score=readbackScore(readback,candidates[i].transform,candidates[i].body);
+        if(!haveSecond || score<second) {second=score;haveSecond=true;}
+    }
+    return {candidates[best].transform,best==count-1,bestScore,haveSecond?second:0,bestResidual};
+}
+inline Pose readbackTransform(const vr::HmdMatrix34_t& readback,Pose previous,Pose pending,const double* physical) {
+    return readbackPick(readback,previous,pending,physical).transform;
+}
 struct FrameMatch {bool found=false;Pose transform;double error=1;bool held=false;};
 struct PhysicalFrame {bool found=false;Pose pose;double predictionSeconds=0;bool interpolated=false;};
 class FrameHistory {
@@ -61,10 +124,7 @@ public:
         // Keep correcting late virtual frames until the supported history window
         // contains only identity output. Then preserve the HMD driver's prediction.
         return count && std::isfinite(now) && now>=lastTick && now-lastTick<=50
-            && lastTick-heldSince>=250
-            && heldTransform.x==0 && heldTransform.y==0 && heldTransform.z==0
-            && std::abs(heldTransform.w)==1
-            && heldTransform.px==0 && heldTransform.py==0 && heldTransform.pz==0;
+            && lastTick-heldSince>=250 && isIdentity(heldTransform);
     }
     PhysicalFrame physicalAt(double now,float prediction) const {
         // SubmitLayer specifies when this frame's HMD pose was predicted to.
