@@ -119,9 +119,7 @@ public sealed class FlightController(
             InfiniteWalkingTransition? modeTransition = null;
             SpaceResetTransition? spaceResetTransition = null;
             FlightMode? inputModeOverride = null;
-            DpadHold dpadHold = DpadHold.None;
-            float dpadHoldSeconds = 0;
-            bool dpadHoldTriggered = false;
+            var gestures = new FlightInputGestures();
             RigidPose? previousReferenceSpaceOffset = null;
             int tick = 0;
             while (!shutdown.IsCancellationRequested)
@@ -143,35 +141,17 @@ public sealed class FlightController(
                 FlightMode selectedMode = inputModeOverride ?? settings.Mode;
                 reportedMode = selectedMode;
 
-                DpadHold currentDpadHold = frame.MotionSuspended ? DpadHold.None : GetDpadHold(frame);
-                if (currentDpadHold != dpadHold)
+                FlightGesture gesture = gestures.Update(frame, elapsedSeconds, selectedMode);
+                bool spaceResetRequested = gesture == FlightGesture.ResetSpace;
+                if (gesture == FlightGesture.ToggleMode)
                 {
-                    dpadHold = currentDpadHold;
-                    dpadHoldSeconds = 0;
-                    dpadHoldTriggered = false;
-                }
-                bool spaceResetRequested = false;
-                if (dpadHold != DpadHold.None && !dpadHoldTriggered)
-                {
-                    dpadHoldSeconds += elapsedSeconds;
-                    if (dpadHoldSeconds >= 1 && dpadHold == DpadHold.Both)
-                    {
-                        selectedMode = selectedMode == FlightMode.InfiniteWalking
-                            ? FlightMode.FreeFlight
-                            : FlightMode.InfiniteWalking;
-                        inputModeOverride = selectedMode;
-                        reportedMode = selectedMode;
-                        dpadHoldTriggered = true;
-                        progress.Report(new(enabled, true, ModeChangedMessage(selectedMode),
-                            Mode: selectedMode));
-                    }
-                    else if (dpadHoldSeconds >= 1 &&
-                        (selectedMode == FlightMode.InfiniteWalking ||
-                            frame.HeadTracked && frame.Head.IsValid))
-                    {
-                        spaceResetRequested = true;
-                        dpadHoldTriggered = true;
-                    }
+                    selectedMode = selectedMode == FlightMode.InfiniteWalking
+                        ? FlightMode.FreeFlight
+                        : FlightMode.InfiniteWalking;
+                    inputModeOverride = selectedMode;
+                    reportedMode = selectedMode;
+                    progress.Report(new(enabled, true, ModeChangedMessage(selectedMode),
+                        Mode: selectedMode));
                 }
                 lock (gate)
                 {
@@ -387,31 +367,6 @@ public sealed class FlightController(
             }
         }
     }
-
-    private enum DpadHold
-    {
-        None,
-        Left,
-        Right,
-        Both
-    }
-
-    private static DpadHold GetDpadHold(InputFrame frame)
-    {
-        bool left = DpadDownHeld(frame.Left);
-        bool right = DpadDownHeld(frame.Right);
-        return (left, right) switch
-        {
-            (true, true) => DpadHold.Both,
-            (true, false) => DpadHold.Left,
-            (false, true) => DpadHold.Right,
-            _ => DpadHold.None
-        };
-    }
-
-    private static bool DpadDownHeld(HandSample hand) =>
-        hand.IsTracked && hand.Pose.IsValid &&
-        float.IsFinite(hand.DpadDown) && hand.DpadDown >= 0.65f;
 
     private static float? TrackpadForce(HandSample hand) =>
         hand.TrackpadForceActive && float.IsFinite(hand.TrackpadForce)
