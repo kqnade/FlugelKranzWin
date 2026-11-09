@@ -8,6 +8,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="FreeFlightReplayBaseline.json" />
     <PackageReference Include="Avalonia.Headless.XUnit" Version="12.1.5" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />

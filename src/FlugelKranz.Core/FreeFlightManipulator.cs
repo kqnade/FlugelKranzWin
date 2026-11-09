@@ -3,7 +3,7 @@ using System.Numerics;
 namespace FlugelKranz.Core;
 
 /// <summary>Consumes poses in the unmodified physical tracking origin, never transformed XR poses.</summary>
-public sealed class FreeFlightManipulator
+public sealed partial class FreeFlightManipulator
 {
     // Stop feeding imperceptibly small per-update changes to the runtime. The
     // threshold is applied to displacement (or radians), so it follows the
@@ -24,31 +24,20 @@ public sealed class FreeFlightManipulator
     private const byte RightHand = 2;
     private const byte BothHands = LeftHand | RightHand;
     private const float MaximumStepSeconds = 0.1f;
-    private bool leftDragArmed, rightDragArmed, leftTurnArmed, rightTurnArmed;
     private readonly HeadPilot pilot = new();
     private bool pilotWasEnabled;
-    private byte dragHands, turnHands;
+    private ManipulationInputs inputs;
+    private DragState drag;
+    private TurnState turn;
+    private InertiaState linear = new() { BrakeFactor = 1 };
+    private InertiaState angular = new() { BrakeFactor = 1 };
     private RigidPose targetOffset;
-    private Vector3 linearInertia, dragVelocity;
-    private Quaternion dragReferenceOrientation;
-    private Vector3 dragAnchorInRoot, previousDragPosition;
     private bool positionTargetUsesDragSmoothing;
-    private bool dragAccelerationBoostActive;
-    private float dragBrakeElapsed, turnBrakeElapsed;
-    private float dragBrakeFactor = 1, turnBrakeFactor = 1;
-    private Quaternion turnAnchor, turnStartOrientation, turnStartOffsetOrientation;
-    private Vector3 twoHandTurnAxis;
-    private Vector3 twoHandTurnPivot;
-    private Quaternion previousTwoHandOrientation;
-    private bool useTwoHandTurnPivotForInertia;
-    private Vector3 angularInertia, turnVelocity;
-    private RigidPose previousTurnTarget;
-    private float linearExemptionSeconds, angularExemptionSeconds;
-    public bool IsDragging => dragHands != 0;
-    public bool IsTurning => turnHands != 0;
+    public bool IsDragging => inputs.DragHands != 0;
+    public bool IsTurning => inputs.TurnHands != 0;
     public bool IsHeadPiloting => pilot.Active;
-    public bool HasLinearInertia => linearInertia.LengthSquared() > 0;
-    public bool HasAngularInertia => angularInertia.LengthSquared() > 0;
+    public bool HasLinearInertia => linear.Velocity.LengthSquared() > 0;
+    public bool HasAngularInertia => angular.Velocity.LengthSquared() > 0;
     public RigidPose Offset { get; private set; }
 
     public FreeFlightManipulator(RigidPose offset) => SetOffset(offset);
@@ -56,19 +45,19 @@ public sealed class FreeFlightManipulator
     public void Release()
     {
         pilot.Release();
-        dragHands = turnHands = 0;
-        leftDragArmed = rightDragArmed = leftTurnArmed = rightTurnArmed = false;
+        inputs.DragHands = inputs.TurnHands = 0;
+        inputs.LeftDragArmed = inputs.RightDragArmed = inputs.LeftTurnArmed = inputs.RightTurnArmed = false;
         targetOffset = Offset;
-        linearInertia = dragVelocity = angularInertia = turnVelocity = Vector3.Zero;
-        dragReferenceOrientation = turnStartOrientation = turnStartOffsetOrientation = Quaternion.Identity;
-        dragAnchorInRoot = previousDragPosition = twoHandTurnAxis = twoHandTurnPivot = Vector3.Zero;
-        previousTwoHandOrientation = Quaternion.Identity;
-        useTwoHandTurnPivotForInertia = false;
+        linear.Velocity = drag.Velocity = angular.Velocity = turn.Velocity = Vector3.Zero;
+        drag.ReferenceOrientation = turn.StartOrientation = turn.StartOffsetOrientation = Quaternion.Identity;
+        drag.AnchorInRoot = drag.PreviousPosition = turn.TwoHandAxis = turn.TwoHandPivot = Vector3.Zero;
+        turn.PreviousTwoHandOrientation = Quaternion.Identity;
+        turn.UseTwoHandPivotForInertia = false;
         positionTargetUsesDragSmoothing = false;
-        dragAccelerationBoostActive = false;
-        dragBrakeElapsed = turnBrakeElapsed = 0;
-        dragBrakeFactor = turnBrakeFactor = 1;
-        linearExemptionSeconds = angularExemptionSeconds = 0;
+        drag.AccelerationBoostActive = false;
+        linear.BrakeElapsed = angular.BrakeElapsed = 0;
+        linear.BrakeFactor = angular.BrakeFactor = 1;
+        linear.ExemptionSeconds = angular.ExemptionSeconds = 0;
     }
 
     public void SetOffset(RigidPose offset)
@@ -101,102 +90,14 @@ public sealed class FreeFlightManipulator
         var pilotFrame = frame;
         if (settings.HeadPilotEnabled)
             frame = frame with { Left = frame.Left with { Turn = 0 }, Right = frame.Right with { Turn = 0 } };
-        if (!settings.DragEnabled)
-        {
-            if (IsDragging) { CancelDrag(); targetOffset = Offset; }
-            dragHands = 0;
-            leftDragArmed = rightDragArmed = false;
-        }
-        byte previousDragHands = dragHands;
-        byte previousTurnHands = turnHands;
-        dragHands = settings.DragEnabled ? ActiveHands(frame, true, previousDragHands) : (byte)0;
-        turnHands = ActiveHands(frame, false, previousTurnHands);
-        if (previousDragHands == BothHands && dragHands is LeftHand or RightHand)
-        {
-            if (dragHands == LeftHand)
-                leftDragArmed = false;
-            else
-                rightDragArmed = false;
-            dragHands = 0;
-        }
-        if (previousTurnHands == BothHands && turnHands is LeftHand or RightHand)
-        {
-            if (turnHands == LeftHand)
-                leftTurnArmed = false;
-            else
-                rightTurnArmed = false;
-            turnHands = 0;
-        }
-        bool dragHandsChanged = dragHands != previousDragHands;
-        bool turnHandsChanged = turnHands != previousTurnHands;
-        bool beganDrag = previousDragHands == 0 && dragHands != 0;
-        bool beganTurn = previousTurnHands == 0 && turnHands != 0;
-        bool beganTwoHandDrag = previousDragHands != BothHands && dragHands == BothHands;
-
-        if (previousDragHands != 0 && dragHands == 0)
-        {
-            if (HandsUsable(frame, previousDragHands))
-                FinishDrag(frame.Head, settings);
-            else
-                CancelDrag();
-        }
-        if (previousTurnHands != 0 && turnHands == 0)
-        {
-            useTwoHandTurnPivotForInertia = previousTurnHands == BothHands;
-            if (HandsUsable(frame, previousTurnHands))
-                FinishTurn(settings);
-            else
-                CancelTurn();
-        }
-
-        if (beganDrag)
-        {
-            linearExemptionSeconds = 0;
-            dragBrakeElapsed = 0;
-            dragBrakeFactor = 1;
-            dragAccelerationBoostActive = false;
-        }
-        if (beganTurn)
-        {
-            angularExemptionSeconds = 0;
-            turnBrakeElapsed = 0;
-            turnBrakeFactor = 1;
-        }
-        if (beganTwoHandDrag)
-        {
-            angularExemptionSeconds = 0;
-            turnBrakeElapsed = 0;
-            turnBrakeFactor = 1;
-        }
-
-        if (!IsDragging && !IsTurning)
-        {
-            // Smoothing may leave the presented offset behind targetOffset when
-            // a grip is released. Start inertia from what is actually visible
-            // instead of snapping to the unapplied target first.
-            targetOffset = Offset;
-        }
-
-        bool activeHandsChanged =
-            (dragHandsChanged && dragHands != 0) ||
-            (turnHandsChanged && turnHands != 0);
-        if (activeHandsChanged)
-        {
-            // A new grip starts from the pose currently presented to the runtime,
-            // discarding any unapplied smoothing remainder without a jump.
-            targetOffset = Offset;
-            if (IsDragging)
-                RebaseDrag(frame);
-            if (IsTurning)
-                RebaseTurn(frame);
-        }
+        var (dragHandsChanged, turnHandsChanged) = UpdateGripState(frame, settings);
 
         var pilotCommand = settings.HeadPilotEnabled ? pilot.Read(pilotFrame, targetOffset, dt) : default;
-        if (settings.HeadPilotEnabled && pilot.Active) angularInertia = Vector3.Zero;
+        if (settings.HeadPilotEnabled && pilot.Active) angular.Velocity = Vector3.Zero;
         if (pilotCommand.ResetInertia)
         {
-            linearInertia = angularInertia = dragVelocity = turnVelocity = Vector3.Zero;
-            linearExemptionSeconds = angularExemptionSeconds = 0;
+            linear.Velocity = angular.Velocity = drag.Velocity = turn.Velocity = Vector3.Zero;
+            linear.ExemptionSeconds = angular.ExemptionSeconds = 0;
             targetOffset = Offset;
             if (IsDragging) RebaseDrag(frame);
             return Offset;
@@ -204,12 +105,12 @@ public sealed class FreeFlightManipulator
         bool thrusting = !IsDragging && pilotCommand.Acceleration.LengthSquared() > 0;
         if (thrusting)
         {
-            linearInertia += pilotCommand.Acceleration * dt;
-            if (linearInertia.Length() > 12) linearInertia = Vector3.Normalize(linearInertia) * 12;
+            linear.Velocity += pilotCommand.Acceleration * dt;
+            if (linear.Velocity.Length() > 12) linear.Velocity = Vector3.Normalize(linear.Velocity) * 12;
         }
-        bool linearMotionActive = linearInertia.LengthSquared() > 0;
-        bool angularMotionActive = angularInertia.LengthSquared() > 0;
-        bool brakingAngularInertia = IsTurning || dragHands == BothHands;
+        bool linearMotionActive = linear.Velocity.LengthSquared() > 0;
+        bool angularMotionActive = angular.Velocity.LengthSquared() > 0;
+        bool brakingAngularInertia = IsTurning || inputs.DragHands == BothHands;
         var orientationBefore = targetOffset.Orientation;
         AdvanceFreeInertia(frame, dt, !IsDragging, !brakingAngularInertia, settings, !thrusting);
         if (!IsDragging && settings.HeadPilotEnabled)
@@ -217,63 +118,7 @@ public sealed class FreeFlightManipulator
             AdvanceTargetRotation(frame, pilotCommand.AngularVelocity, dt, settings with { TurnOrigin = TurnOrigin.Head });
             if (pilotCommand.AngularVelocity.LengthSquared() > 0) angularMotionActive = true;
         }
-        if (IsDragging)
-        {
-            float controllerSpeed = ControllerMovementSpeed(frame, sampleSeconds);
-            dragAccelerationBoostActive =
-                settings.InertiaAccelerationBoostEnabled &&
-                controllerSpeed > settings.DragCutoffMetresPerSecond;
-            if (!dragAccelerationBoostActive)
-                ApplyGrabBrake(
-                    ref linearInertia,
-                    ref dragBrakeElapsed,
-                    ref dragBrakeFactor,
-                    dt,
-                    settings.BrakeRampSeconds);
-            Vector3 dragInertiaStep = linearInertia * dt;
-            dragAnchorInRoot += dragInertiaStep;
-            ApplyDeceleration(
-                ref linearInertia,
-                ref linearExemptionSeconds,
-                dt,
-                settings,
-                settings.InertiaStopDisplacementMetres);
-        }
-        if (IsTurning)
-        {
-            ApplyGrabBrake(
-                ref angularInertia,
-                ref turnBrakeElapsed,
-                ref turnBrakeFactor,
-                dt,
-                settings.BrakeRampSeconds);
-            if (turnHands == BothHands)
-                turnStartOffsetOrientation = IntegrateRotation(turnStartOffsetOrientation, angularInertia, dt);
-            else
-                turnAnchor = IntegrateRotation(turnAnchor, angularInertia, dt);
-            ApplyDeceleration(
-                ref angularInertia,
-                ref angularExemptionSeconds,
-                dt,
-                settings,
-                settings.InertiaStopDisplacementMetres);
-        }
-        else if (dragHands == BothHands)
-        {
-            ApplyGrabBrake(
-                ref angularInertia,
-                ref turnBrakeElapsed,
-                ref turnBrakeFactor,
-                dt,
-                settings.BrakeRampSeconds);
-            AdvanceTargetRotation(frame, angularInertia, dt, settings);
-            ApplyDeceleration(
-                ref angularInertia,
-                ref angularExemptionSeconds,
-                dt,
-                settings,
-                settings.InertiaStopDisplacementMetres);
-        }
+        AdvanceGrabInertia(frame, dt, sampleSeconds, settings);
 
         var target = GrabTarget(frame, settings);
         UpdateRawVelocities(
@@ -295,17 +140,174 @@ public sealed class FreeFlightManipulator
         return Offset;
     }
 
+    private (bool DragChanged, bool TurnChanged) UpdateGripState(InputFrame frame, FlightMotionSettings settings)
+    {
+        if (!settings.DragEnabled)
+        {
+            if (IsDragging) { CancelDrag(); targetOffset = Offset; }
+            inputs.DragHands = 0;
+            inputs.LeftDragArmed = inputs.RightDragArmed = false;
+        }
+        byte previousDragHands = inputs.DragHands;
+        byte previousTurnHands = inputs.TurnHands;
+        inputs.DragHands = settings.DragEnabled ? ActiveHands(frame, true, previousDragHands) : (byte)0;
+        inputs.TurnHands = ActiveHands(frame, false, previousTurnHands);
+        if (previousDragHands == BothHands && inputs.DragHands is LeftHand or RightHand)
+        {
+            if (inputs.DragHands == LeftHand)
+                inputs.LeftDragArmed = false;
+            else
+                inputs.RightDragArmed = false;
+            inputs.DragHands = 0;
+        }
+        if (previousTurnHands == BothHands && inputs.TurnHands is LeftHand or RightHand)
+        {
+            if (inputs.TurnHands == LeftHand)
+                inputs.LeftTurnArmed = false;
+            else
+                inputs.RightTurnArmed = false;
+            inputs.TurnHands = 0;
+        }
+        bool dragHandsChanged = inputs.DragHands != previousDragHands;
+        bool turnHandsChanged = inputs.TurnHands != previousTurnHands;
+        bool beganDrag = previousDragHands == 0 && inputs.DragHands != 0;
+        bool beganTurn = previousTurnHands == 0 && inputs.TurnHands != 0;
+        bool beganTwoHandDrag = previousDragHands != BothHands && inputs.DragHands == BothHands;
+
+        if (previousDragHands != 0 && inputs.DragHands == 0)
+        {
+            if (HandsUsable(frame, previousDragHands))
+                FinishDrag(frame.Head, settings);
+            else
+                CancelDrag();
+        }
+        if (previousTurnHands != 0 && inputs.TurnHands == 0)
+        {
+            turn.UseTwoHandPivotForInertia = previousTurnHands == BothHands;
+            if (HandsUsable(frame, previousTurnHands))
+                FinishTurn(settings);
+            else
+                CancelTurn();
+        }
+
+        if (beganDrag)
+        {
+            linear.ExemptionSeconds = 0;
+            linear.BrakeElapsed = 0;
+            linear.BrakeFactor = 1;
+            drag.AccelerationBoostActive = false;
+        }
+        if (beganTurn)
+        {
+            angular.ExemptionSeconds = 0;
+            angular.BrakeElapsed = 0;
+            angular.BrakeFactor = 1;
+        }
+        if (beganTwoHandDrag)
+        {
+            angular.ExemptionSeconds = 0;
+            angular.BrakeElapsed = 0;
+            angular.BrakeFactor = 1;
+        }
+
+        if (!IsDragging && !IsTurning)
+        {
+            // Smoothing may leave the presented offset behind targetOffset when
+            // a grip is released. Start inertia from what is actually visible
+            // instead of snapping to the unapplied target first.
+            targetOffset = Offset;
+        }
+
+        bool activeHandsChanged =
+            (dragHandsChanged && inputs.DragHands != 0) ||
+            (turnHandsChanged && inputs.TurnHands != 0);
+        if (activeHandsChanged)
+        {
+            // A new grip starts from the pose currently presented to the runtime,
+            // discarding any unapplied smoothing remainder without a jump.
+            targetOffset = Offset;
+            if (IsDragging)
+                RebaseDrag(frame);
+            if (IsTurning)
+                RebaseTurn(frame);
+        }
+
+        return (dragHandsChanged, turnHandsChanged);
+    }
+
+    private void AdvanceGrabInertia(InputFrame frame, float dt, float sampleSeconds, FlightMotionSettings settings)
+    {
+        if (IsDragging)
+        {
+            float controllerSpeed = ControllerMovementSpeed(frame, sampleSeconds);
+            drag.AccelerationBoostActive =
+                settings.InertiaAccelerationBoostEnabled &&
+                controllerSpeed > settings.DragCutoffMetresPerSecond;
+            if (!drag.AccelerationBoostActive)
+                ApplyGrabBrake(
+                    ref linear.Velocity,
+                    ref linear.BrakeElapsed,
+                    ref linear.BrakeFactor,
+                    dt,
+                    settings.BrakeRampSeconds);
+            Vector3 dragInertiaStep = linear.Velocity * dt;
+            drag.AnchorInRoot += dragInertiaStep;
+            ApplyDeceleration(
+                ref linear.Velocity,
+                ref linear.ExemptionSeconds,
+                dt,
+                settings,
+                settings.InertiaStopDisplacementMetres);
+        }
+        if (IsTurning)
+        {
+            ApplyGrabBrake(
+                ref angular.Velocity,
+                ref angular.BrakeElapsed,
+                ref angular.BrakeFactor,
+                dt,
+                settings.BrakeRampSeconds);
+            if (inputs.TurnHands == BothHands)
+                turn.StartOffsetOrientation = IntegrateRotation(turn.StartOffsetOrientation, angular.Velocity, dt);
+            else
+                turn.Anchor = IntegrateRotation(turn.Anchor, angular.Velocity, dt);
+            ApplyDeceleration(
+                ref angular.Velocity,
+                ref angular.ExemptionSeconds,
+                dt,
+                settings,
+                settings.InertiaStopDisplacementMetres);
+        }
+        else if (inputs.DragHands == BothHands)
+        {
+            ApplyGrabBrake(
+                ref angular.Velocity,
+                ref angular.BrakeElapsed,
+                ref angular.BrakeFactor,
+                dt,
+                settings.BrakeRampSeconds);
+            AdvanceTargetRotation(frame, angular.Velocity, dt, settings);
+            ApplyDeceleration(
+                ref angular.Velocity,
+                ref angular.ExemptionSeconds,
+                dt,
+                settings,
+                settings.InertiaStopDisplacementMetres);
+        }
+
+    }
+
     private byte ActiveHands(InputFrame frame, bool drag, byte previous)
     {
         byte result = 0;
         bool leftHeld = (previous & LeftHand) != 0;
         bool rightHeld = (previous & RightHand) != 0;
         bool left = drag
-            ? Held(frame.Left, frame.Left.Drag, ref leftDragArmed, leftHeld)
-            : Held(frame.Left, frame.Left.Turn, ref leftTurnArmed, leftHeld);
+            ? Held(frame.Left, frame.Left.Drag, ref inputs.LeftDragArmed, leftHeld)
+            : Held(frame.Left, frame.Left.Turn, ref inputs.LeftTurnArmed, leftHeld);
         bool right = drag
-            ? Held(frame.Right, frame.Right.Drag, ref rightDragArmed, rightHeld)
-            : Held(frame.Right, frame.Right.Turn, ref rightTurnArmed, rightHeld);
+            ? Held(frame.Right, frame.Right.Drag, ref inputs.RightDragArmed, rightHeld)
+            : Held(frame.Right, frame.Right.Turn, ref inputs.RightTurnArmed, rightHeld);
         if (left)
             result |= LeftHand;
         if (right)
@@ -315,29 +317,29 @@ public sealed class FreeFlightManipulator
 
     private void RebaseDrag(InputFrame frame)
     {
-        dragReferenceOrientation = targetOffset.Orientation;
-        previousDragPosition = HandPosition(frame, dragHands);
-        dragAnchorInRoot = targetOffset.Transform(previousDragPosition);
-        dragVelocity = Vector3.Zero;
+        drag.ReferenceOrientation = targetOffset.Orientation;
+        drag.PreviousPosition = HandPosition(frame, inputs.DragHands);
+        drag.AnchorInRoot = targetOffset.Transform(drag.PreviousPosition);
+        drag.Velocity = Vector3.Zero;
     }
 
     private void RebaseTurn(InputFrame frame)
     {
-        turnStartOrientation = HandOrientation(frame, turnHands);
-        turnStartOffsetOrientation = targetOffset.Orientation;
-        turnAnchor = Quaternion.Normalize(targetOffset.Orientation * turnStartOrientation);
-        twoHandTurnAxis = turnHands == BothHands
+        turn.StartOrientation = HandOrientation(frame, inputs.TurnHands);
+        turn.StartOffsetOrientation = targetOffset.Orientation;
+        turn.Anchor = Quaternion.Normalize(targetOffset.Orientation * turn.StartOrientation);
+        turn.TwoHandAxis = inputs.TurnHands == BothHands
             ? SafeDirection(frame.Right.Pose.Position - frame.Left.Pose.Position)
             : Vector3.Zero;
-        twoHandTurnPivot = turnHands == BothHands
+        turn.TwoHandPivot = inputs.TurnHands == BothHands
             ? HandPosition(frame, BothHands)
             : Vector3.Zero;
-        previousTwoHandOrientation = turnHands == BothHands
+        turn.PreviousTwoHandOrientation = inputs.TurnHands == BothHands
             ? HandOrientation(frame, BothHands)
             : Quaternion.Identity;
-        useTwoHandTurnPivotForInertia = turnHands == BothHands;
-        turnVelocity = Vector3.Zero;
-        previousTurnTarget = targetOffset;
+        turn.UseTwoHandPivotForInertia = inputs.TurnHands == BothHands;
+        turn.Velocity = Vector3.Zero;
+        turn.PreviousTarget = targetOffset;
     }
 
     private void FollowTarget(
@@ -362,10 +364,10 @@ public sealed class FreeFlightManipulator
         Vector3 position;
         if (IsDragging)
         {
-            Vector3 dragPoint = HandPosition(frame, dragHands);
+            Vector3 dragPoint = HandPosition(frame, inputs.DragHands);
             Vector3 dragPointInRoot = MotionSmoothing.Follow(
                 Offset.Transform(dragPoint),
-                dragAnchorInRoot,
+                drag.AnchorInRoot,
                 settings.DragSmoothSeconds,
                 elapsedSeconds);
             position = dragPointInRoot - Vector3.Transform(dragPoint, orientation);
@@ -400,28 +402,28 @@ public sealed class FreeFlightManipulator
     {
         if (dragging && sampleSeconds > 0)
         {
-            Vector3 current = HandPosition(frame, dragHands);
-            var controllerDelta = current - previousDragPosition;
-            dragVelocity = -Vector3.Transform(controllerDelta, dragReferenceOrientation) / sampleSeconds;
-            previousDragPosition = current;
+            Vector3 current = HandPosition(frame, inputs.DragHands);
+            var controllerDelta = current - drag.PreviousPosition;
+            drag.Velocity = -Vector3.Transform(controllerDelta, drag.ReferenceOrientation) / sampleSeconds;
+            drag.PreviousPosition = current;
         }
 
         if (turning && sampleSeconds > 0)
         {
-            turnVelocity = RotationVelocity(
-                previousTurnTarget.Orientation,
+            turn.Velocity = RotationVelocity(
+                turn.PreviousTarget.Orientation,
                 target.Orientation,
                 sampleSeconds);
-            previousTurnTarget = target;
+            turn.PreviousTarget = target;
         }
     }
 
     private float ControllerMovementSpeed(InputFrame frame, float sampleSeconds)
     {
         if (sampleSeconds <= 0)
-            return dragVelocity.Length();
+            return drag.Velocity.Length();
 
-        return Vector3.Distance(HandPosition(frame, dragHands), previousDragPosition) / sampleSeconds;
+        return Vector3.Distance(HandPosition(frame, inputs.DragHands), drag.PreviousPosition) / sampleSeconds;
     }
 
     private static void ApplyGrabBrake(
@@ -453,7 +455,7 @@ public sealed class FreeFlightManipulator
 
     private void RotateLinearInertia(Quaternion from, Quaternion to, float multiplier)
     {
-        if (linearInertia.LengthSquared() <= 0 || multiplier <= 0)
+        if (linear.Velocity.LengthSquared() <= 0 || multiplier <= 0)
             return;
 
         var delta = Quaternion.Normalize(to * Quaternion.Conjugate(from));
@@ -461,7 +463,7 @@ public sealed class FreeFlightManipulator
             delta = -delta;
 
         var applied = Quaternion.Normalize(Quaternion.Slerp(Quaternion.Identity, delta, multiplier));
-        linearInertia = Vector3.Transform(linearInertia, applied);
+        linear.Velocity = Vector3.Transform(linear.Velocity, applied);
     }
 
     private RigidPose GrabTarget(InputFrame frame, FlightMotionSettings settings)
@@ -475,60 +477,60 @@ public sealed class FreeFlightManipulator
             translation = targetOffset.Transform(pivot) - Vector3.Transform(pivot, rotation);
         }
         if (IsDragging)
-            translation = dragAnchorInRoot -
-                Vector3.Transform(HandPosition(frame, dragHands), rotation);
+            translation = drag.AnchorInRoot -
+                Vector3.Transform(HandPosition(frame, inputs.DragHands), rotation);
 
         return new(rotation, translation);
     }
 
     private Quaternion TurnTargetOrientation(InputFrame frame)
     {
-        if (turnHands != BothHands)
+        if (inputs.TurnHands != BothHands)
         {
-            Quaternion singleHandOrientation = HandOrientation(frame, turnHands);
-            return Quaternion.Normalize(turnAnchor * Quaternion.Conjugate(singleHandOrientation));
+            Quaternion singleHandOrientation = HandOrientation(frame, inputs.TurnHands);
+            return Quaternion.Normalize(turn.Anchor * Quaternion.Conjugate(singleHandOrientation));
         }
 
         Quaternion current = HandOrientation(frame, BothHands);
-        if (Quaternion.Dot(current, previousTwoHandOrientation) < 0)
+        if (Quaternion.Dot(current, turn.PreviousTwoHandOrientation) < 0)
             current = -current;
 
         // Keep the pole axis captured at the moment both hands start turning.
         // Reprojecting the accumulated pose onto a moving hand line can turn
         // tracking noise or a large pose change into an unintended spin.
-        Vector3 axis = twoHandTurnAxis;
+        Vector3 axis = turn.TwoHandAxis;
         if (axis.LengthSquared() <= 0)
         {
-            previousTwoHandOrientation = current;
-            return turnStartOffsetOrientation;
+            turn.PreviousTwoHandOrientation = current;
+            return turn.StartOffsetOrientation;
         }
 
-        Quaternion controllerDelta = Quaternion.Normalize(current * Quaternion.Conjugate(previousTwoHandOrientation));
+        Quaternion controllerDelta = Quaternion.Normalize(current * Quaternion.Conjugate(turn.PreviousTwoHandOrientation));
         float twistAngle = RotationAngleAroundAxis(controllerDelta, axis);
-        previousTwoHandOrientation = current;
+        turn.PreviousTwoHandOrientation = current;
         if (MathF.Abs(twistAngle) > 0)
         {
             Quaternion inverseTwist = Quaternion.CreateFromAxisAngle(axis, -twistAngle);
-            turnStartOffsetOrientation = Quaternion.Normalize(
-                turnStartOffsetOrientation * inverseTwist);
+            turn.StartOffsetOrientation = Quaternion.Normalize(
+                turn.StartOffsetOrientation * inverseTwist);
         }
-        return turnStartOffsetOrientation;
+        return turn.StartOffsetOrientation;
     }
 
     private Vector3 TurnPivot(InputFrame frame, FlightMotionSettings settings)
     {
         if (IsDragging)
-            return HandPosition(frame, dragHands);
-        if (turnHands == BothHands ||
-            (turnHands == 0 && useTwoHandTurnPivotForInertia && angularInertia.LengthSquared() > 0))
-            return twoHandTurnPivot;
+            return HandPosition(frame, inputs.DragHands);
+        if (inputs.TurnHands == BothHands ||
+            (inputs.TurnHands == 0 && turn.UseTwoHandPivotForInertia && angular.Velocity.LengthSquared() > 0))
+            return turn.TwoHandPivot;
         return GetSingleHandTurnPivot(frame, settings);
     }
 
     internal Vector3 GetSingleHandTurnPivot(InputFrame frame, FlightMotionSettings settings)
     {
         if (IsDragging)
-            return HandPosition(frame, dragHands);
+            return HandPosition(frame, inputs.DragHands);
         if (settings.TurnOrigin == TurnOrigin.Head)
             return frame.Head.Position;
 
@@ -583,29 +585,29 @@ public sealed class FreeFlightManipulator
 
         var rotation = targetOffset.Orientation;
         var translation = targetOffset.Position;
-        if (turn && angularInertia.LengthSquared() > 0)
+        if (turn && angular.Velocity.LengthSquared() > 0)
         {
             Vector3 pivot = TurnPivot(frame, settings);
             var pivotInRoot = targetOffset.Transform(pivot);
-            rotation = IntegrateRotation(rotation, angularInertia, dt);
+            rotation = IntegrateRotation(rotation, angular.Velocity, dt);
             translation = pivotInRoot - Vector3.Transform(pivot, rotation);
         }
 
         if (move)
-            translation += linearInertia * dt;
+            translation += linear.Velocity * dt;
 
         targetOffset = new(rotation, translation);
         if (move && dampTranslation)
             ApplyDeceleration(
-                ref linearInertia,
-                ref linearExemptionSeconds,
+                ref linear.Velocity,
+                ref linear.ExemptionSeconds,
                 dt,
                 settings,
                 settings.InertiaStopDisplacementMetres);
         if (turn)
             ApplyDeceleration(
-                ref angularInertia,
-                ref angularExemptionSeconds,
+                ref angular.Velocity,
+                ref angular.ExemptionSeconds,
                 dt,
                 settings,
                 settings.InertiaStopDisplacementMetres);
@@ -613,41 +615,41 @@ public sealed class FreeFlightManipulator
 
     private void FinishDrag(RigidPose head, FlightMotionSettings settings)
     {
-        bool hasUsableAcceleration = dragVelocity.LengthSquared() > 0.0000000001f &&
-            (!settings.InertiaCutoffEnabled || dragVelocity.Length() >= settings.DragCutoffMetresPerSecond);
+        bool hasUsableAcceleration = drag.Velocity.LengthSquared() > 0.0000000001f &&
+            (!settings.InertiaCutoffEnabled || drag.Velocity.Length() >= settings.DragCutoffMetresPerSecond);
         if (hasUsableAcceleration)
         {
-            // dragVelocity is in root space. Apply the reference-space rotation
+            // drag.Velocity is in root space. Apply the reference-space rotation
             // to the physical HMD orientation before comparing their directions.
             var headInRoot = Quaternion.Normalize(Offset.Orientation * head.Orientation);
-            var acceleration = ApplyDragAcceleration(dragVelocity, headInRoot, settings);
-            float speedBeforeBoost = linearInertia.Length();
-            if (dragAccelerationBoostActive && speedBeforeBoost > 0.0000000001f)
+            var acceleration = ApplyDragAcceleration(drag.Velocity, headInRoot, settings);
+            float speedBeforeBoost = linear.Velocity.Length();
+            if (drag.AccelerationBoostActive && speedBeforeBoost > 0.0000000001f)
             {
-                var boosted = linearInertia + acceleration;
+                var boosted = linear.Velocity + acceleration;
                 float boostReferenceSpeed = MathF.Max(speedBeforeBoost, acceleration.Length());
                 float maximumSpeed = boostReferenceSpeed * settings.InertiaAccelerationBoostMaximumMultiplier;
                 if (boosted.Length() > maximumSpeed && maximumSpeed > 0)
                     boosted = Vector3.Normalize(boosted) * maximumSpeed;
-                linearInertia = boosted;
+                linear.Velocity = boosted;
             }
             else
-                linearInertia = acceleration;
+                linear.Velocity = acceleration;
 
-            linearExemptionSeconds = ExemptionDuration(
-                linearInertia.Length(),
+            linear.ExemptionSeconds = ExemptionDuration(
+                linear.Velocity.Length(),
                 0.001f,
                 settings.DragDecelerationExemptionDurationRatio,
                 settings);
         }
-        else if (linearInertia.LengthSquared() <= 0.0000000001f)
+        else if (linear.Velocity.LengthSquared() <= 0.0000000001f)
         {
-            linearInertia = Vector3.Zero;
-            linearExemptionSeconds = 0;
+            linear.Velocity = Vector3.Zero;
+            linear.ExemptionSeconds = 0;
         }
 
-        dragAccelerationBoostActive = false;
-        dragVelocity = Vector3.Zero;
+        drag.AccelerationBoostActive = false;
+        drag.Velocity = Vector3.Zero;
     }
 
     private static Vector3 ApplyDragAcceleration(
@@ -670,13 +672,13 @@ public sealed class FreeFlightManipulator
 
     private void FinishTurn(FlightMotionSettings settings)
     {
-        if (settings.InertiaCutoffEnabled && turnVelocity.Length() < settings.TurnCutoffRadiansPerSecond)
-            angularInertia = Vector3.Zero;
+        if (settings.InertiaCutoffEnabled && turn.Velocity.Length() < settings.TurnCutoffRadiansPerSecond)
+            angular.Velocity = Vector3.Zero;
         else
-            angularInertia = turnVelocity * settings.TurnAccelerationMultiplier;
+            angular.Velocity = turn.Velocity * settings.TurnAccelerationMultiplier;
 
-        angularExemptionSeconds = ExemptionDuration(
-            angularInertia.Length(),
+        angular.ExemptionSeconds = ExemptionDuration(
+            angular.Velocity.Length(),
             MathF.PI / 1800,
             settings.TurnDecelerationExemptionDurationRatio,
             settings);
@@ -721,21 +723,21 @@ public sealed class FreeFlightManipulator
 
     private void CancelDrag()
     {
-        linearInertia = dragVelocity = Vector3.Zero;
-        dragAnchorInRoot = previousDragPosition = Vector3.Zero;
-        dragAccelerationBoostActive = false;
-        dragBrakeElapsed = 0;
-        dragBrakeFactor = 1;
-        linearExemptionSeconds = 0;
+        linear.Velocity = drag.Velocity = Vector3.Zero;
+        drag.AnchorInRoot = drag.PreviousPosition = Vector3.Zero;
+        drag.AccelerationBoostActive = false;
+        linear.BrakeElapsed = 0;
+        linear.BrakeFactor = 1;
+        linear.ExemptionSeconds = 0;
     }
 
     private void CancelTurn()
     {
-        angularInertia = turnVelocity = Vector3.Zero;
-        turnBrakeElapsed = 0;
-        turnBrakeFactor = 1;
-        angularExemptionSeconds = 0;
-        useTwoHandTurnPivotForInertia = false;
+        angular.Velocity = turn.Velocity = Vector3.Zero;
+        angular.BrakeElapsed = 0;
+        angular.BrakeFactor = 1;
+        angular.ExemptionSeconds = 0;
+        turn.UseTwoHandPivotForInertia = false;
     }
 
     internal static Quaternion IntegrateRotation(Quaternion rotation, Vector3 velocity, float dt)
