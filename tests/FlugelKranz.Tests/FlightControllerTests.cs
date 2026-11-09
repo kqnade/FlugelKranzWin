@@ -431,6 +431,40 @@ public class FlightControllerTests
         else Assert.Equal(interrupted, stopped);
     }
 
+    [Fact]
+    public async Task OffDuringPartialResetPreservesLegacyDragBaseline()
+    {
+        var baseline = new RigidPose(Quaternion.CreateFromYawPitchRoll(0.4f, 0.7f, -0.3f), new(1, 2, 3));
+        var runtime = new FakeRuntime();
+        runtime.Apply(baseline);
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, FreeFlightSettings);
+        controller.SetEnabled(true);
+        await Wait(() => progress.Statuses.Any(s => s.Connected));
+        runtime.Frame = DpadFrame(1, 0);
+        await Wait(() => progress.Statuses.Any(s => s.Message.Contains("水平へ戻しています")));
+        runtime.BeforeNextRead = () => controller.SetEnabled(false);
+        int reads = runtime.Reads;
+        await Wait(() => runtime.Reads > reads + 2);
+        Assert.Equal(baseline, runtime.CurrentOffset);
+    }
+
+    [Fact]
+    public async Task WalkingEntryUsesRuntimeConnectionBaseline()
+    {
+        var runtime = new FakeRuntime { OriginalOffset = new(Quaternion.Identity, new(0, 0.7f, 0)) };
+        runtime.Apply(new(Quaternion.Identity, new(1, 2, 3)));
+        var settings = FreeFlightSettings();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.SetEnabled(true);
+        await Wait(() => progress.Statuses.Any(s => s.Connected));
+        settings = settings with { Mode = FlightMode.InfiniteWalking };
+        var target = new Vector3(1, 0.7f, 3);
+        await Wait(() => runtime.CurrentOffset.Position == target);
+        Assert.Equal(target, runtime.CurrentOffset.Position);
+    }
+
     private static InputFrame Frame(float grip, float x) => new(RigidPose.Identity, true,
         new(new(Quaternion.Identity, new(x, 0, 0)), grip, 0, 0, true),
         new(RigidPose.Identity, 0, 0, 0, true));
@@ -470,7 +504,7 @@ public class FlightControllerTests
         private RigidPose offset = RigidPose.Identity;
         public InputFrame Frame { get { lock (gate) return frame; } set { lock (gate) frame = value; } }
         public int Reads => Volatile.Read(ref reads);
-        public RigidPose OriginalOffset => RigidPose.Identity;
+        public RigidPose OriginalOffset { get; init; } = RigidPose.Identity;
         public RigidPose CurrentOffset { get { lock (gate) return offset; } }
         public volatile bool Disposed, ThrowOnRead, ThrowOnDispose, ThrowOnApply, ThrowOnRestore;
         public ConcurrentQueue<string> FailuresAndCleanup { get; } = new();
