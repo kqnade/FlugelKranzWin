@@ -33,7 +33,7 @@ int main() {
     std::atomic<bool> finished{false};
     std::thread cleanup;
     {
-        CallbackScope active;
+        CallbackScope active{hooks};
         cleanup=std::thread([&]{provider.Cleanup();finished=true;});
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
         while(!waitingForCallbacks && !finished && std::chrono::steady_clock::now()<deadline) {
@@ -44,14 +44,14 @@ int main() {
         require(ipc.state!=nullptr && ipc.mapping!=nullptr && ipc.ipcMutex!=nullptr);
     }
     cleanup.join();
-    require(finished && inFlight==0);
+    require(finished && hooks.inFlight==0);
     require(!ipc.state && !ipc.mapping && !ipc.ipcMutex);
     require(flight::isIdentity(ipc.command) && ipc.lastHeartbeat==0);
     require(flight::isIdentity(readback.Inspect(0).applied) && readback.Inspect(0).committed==0);
     require(!physicalHeadValid && !callerPolicy.propertiesReady && callerPolicy.anchoredDevices[0]==0);
     require(callerPolicy.physicalCallSites[0]==nullptr);
     provider.Cleanup(); // repeated/partial cleanup must remain safe
-    require(!ipc.state && !ipc.mapping && !ipc.ipcMutex && inFlight==0);
+    require(!ipc.state && !ipc.mapping && !ipc.ipcMutex && hooks.inFlight==0);
     int error=-1;
     require(HmdDriverFactory(vr::IServerTrackedDeviceProvider_Version,&error)==&provider);
     require(error==vr::VRInitError_None);

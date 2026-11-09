@@ -70,18 +70,18 @@ int main() {
     eyes[0].flHmdPosePredictionTimeInSecondsFromNow=0.013f;
     std::memcpy(expectedCopy,eyes,sizeof(eyes));
     expectedEyes=eyes;
-    submitOriginal=forwardedSubmit;
+    hooks.submitOriginal=forwardedSubmit;
     // Logging disabled here: verifies the production forwarding path in isolation.
     nextFrameLog=std::numeric_limits<uint64_t>::max();
     observedSubmit(expectedSelf,eyes);
-    require(forwarded==1 && inFlight==0);
+    require(forwarded==1 && hooks.inFlight==0);
     require(std::memcmp(eyes,expectedCopy,sizeof(eyes))==0);
-    componentOriginal=forwardedComponent;
+    hooks.componentOriginal=forwardedComponent;
     require(observedComponent(expectedSelf,vr::IVRDriverDirectModeComponent_Version)==nullptr);
     componentResult=reinterpret_cast<void*>(0x5678);
     require(observedComponent(expectedSelf,"IVRDriverDirectModeComponent_008")==componentResult);
-    require(submitTarget==nullptr && componentTarget==nullptr);
-    require(forwarded==3 && inFlight==0);
+    require(hooks.submitTarget==nullptr && hooks.componentTarget==nullptr);
+    require(forwarded==3 && hooks.inFlight==0);
     vr::DriverPose_t head{};
     head.qRotation.w=head.qWorldFromDriverRotation.w=head.qDriverFromHeadRotation.w=1;
     head.poseIsValid=head.deviceIsConnected=true;
@@ -99,44 +99,44 @@ int main() {
     // Float rounding after inverse multiplication is checked separately; retain
     // the full byte-level check for all fields outside the pose matrix.
     for(int i=0;i<2;i++) expectedCopy[i].mHmdPose=flight::removeTransform(eyes[i].mHmdPose,transform);
-    correctFramePose=true;expectCopy=true;
-    frameHistory.add(frameTimeMs(),output,transform);
+    frameCorrection.correctFramePose=true;expectCopy=true;
+    frameCorrection.Add(frameTimeMs(),output,transform);
     observedSubmit(expectedSelf,eyes);
-    require(forwarded==4 && inFlight==0);
+    require(forwarded==4 && hooks.inFlight==0);
     require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
-    frameHistory.clear();expectCopy=false;
+    frameCorrection.ClearAfterDrain();expectCopy=false;
     std::memcpy(expectedCopy,eyes,sizeof(eyes));
     observedSubmit(expectedSelf,eyes);
-    require(forwarded==5 && inFlight==0);
-    timeBasedFramePose=true;expectCopy=true;
-    frameHistory.add(frameTimeMs(),output,transform,&head);
+    require(forwarded==5 && hooks.inFlight==0);
+    frameCorrection.timeBasedFramePose=true;expectCopy=true;
+    frameCorrection.Add(frameTimeMs(),output,transform,&head);
     for(auto& eye:expectedCopy) eye.mHmdPose=flight::matrix(flight::physical(head));
     observedSubmit(expectedSelf,eyes);
-    require(forwarded==6 && inFlight==0);
+    require(forwarded==6 && hooks.inFlight==0);
     require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
     // Identity must preserve even a render pose that differs from our own
     // prediction: forward the exact original pointer and bytes.
-    frameHistory.clear();
+    frameCorrection.ClearAfterDrain();
     const double resetNow=frameTimeMs();
-    for(int dt=300;dt>=0;dt-=10) frameHistory.add(resetNow-dt,head,flight::Pose{},&head);
+    for(int dt=300;dt>=0;dt-=10) frameCorrection.Add(resetNow-dt,head,flight::Pose{},&head);
     expectCopy=false;
     std::memcpy(expectedCopy,eyes,sizeof(eyes));
     auto missedBefore=missedLayers.load();
     observedSubmit(expectedSelf,eyes);
-    require(forwarded==7 && inFlight==0);
+    require(forwarded==7 && hooks.inFlight==0);
     require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
     require(missedLayers.load()==missedBefore);
     // Stable flight keeps the HMD driver's render prediction, even when it
     // disagrees with the independent physical prediction in our history.
-    frameHistory.clear();
+    frameCorrection.ClearAfterDrain();
     head.vecVelocity[0]=5;
     const double heldNow=frameTimeMs();
-    for(int dt=300;dt>=0;dt-=10) frameHistory.add(heldNow-dt,output,transform,&head);
+    for(int dt=300;dt>=0;dt-=10) frameCorrection.Add(heldNow-dt,output,transform,&head);
     for(int i=0;i<2;i++) expectedCopy[i].mHmdPose=flight::removeTransform(eyes[i].mHmdPose,transform);
     expectCopy=true;
     auto heldBefore=heldLayers.load();
     observedSubmit(expectedSelf,eyes);
-    require(forwarded==8 && inFlight==0);
+    require(forwarded==8 && hooks.inFlight==0);
     require(heldLayers.load()==heldBefore+1);
     require(std::memcmp(eyes,originalCopy,sizeof(eyes))==0);
     std::puts("Observer forwards original layers and ignores unavailable/unsupported interfaces: passed");

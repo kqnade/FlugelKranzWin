@@ -72,7 +72,7 @@ void harnessTests(const vr::DriverPose_t& tracker,uint32_t device) {
     loadSettings();
     require(context.log.contains("FlugelKranz flags: observeFrames=0 correctFramePose=0 timeBasedFramePose=0"));
     require(std::strcmp(callerPolicy.physicalPoseDrivers,"driver_slimevr.dll,driver_rebocap.dll")==0);
-    observeFrames=correctFramePose=timeBasedFramePose=false;
+    observeFrames=frameCorrection.correctFramePose=frameCorrection.timeBasedFramePose=false;
 
     // Device properties: only a listed tracking system is anchored, and the answer is cached.
     std::snprintf(callerPolicy.hmdAnchoredSystems,sizeof(callerPolicy.hmdAnchoredSystems),"%s","SlimeVR");
@@ -90,7 +90,7 @@ void harnessTests(const vr::DriverPose_t& tracker,uint32_t device) {
     harness::publish(flight);
     {std::lock_guard<std::mutex> lock(gate);ipc.refresh();}
     require(same(ipc.command,flight) && ipc.lastHeartbeat!=0);
-    originals[0]=storingOriginal;
+    hooks.originals[0]=storingOriginal;
     {
         harness::AppHoldsIpc paused;
         const auto before=ipc.state->samples[device].timestamp;
@@ -116,7 +116,7 @@ void harnessTests(const vr::DriverPose_t& tracker,uint32_t device) {
     harness::publish(flight);
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     require(same(readback.Inspect(device).applied,flight));
-    rawOriginal=serverReadback;
+    hooks.rawOriginal=serverReadback;
     harness::servePhysicalPosesToThisProcess();
     std::array<vr::TrackedDevicePose_t,16> poses{};
     rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
@@ -167,33 +167,33 @@ void batchReadback(void* host,float prediction,vr::TrackedDevicePose_t* poses,ui
 }
 void generationTests(const vr::DriverPose_t& tracker,uint32_t device) {
     harness::servePhysicalPosesToThisProcess();
-    originals[0]=storingOriginal;rawOriginal=serverReadback;
+    hooks.originals[0]=storingOriginal;hooks.rawOriginal=serverReadback;
     nextDevice=device;nextTracker=tracker;
     const auto physical=flight::physical(tracker);
     const auto body=flight::matrix(physical);
     const flight::Pose a{0,0,0,1,3,-1,2},b{0,0,0,1,1,0,0},c{0,0,0,1,0,2,0};
     auto checkStraddle=[&](flight::Pose before,flight::Pose after) {
         harness::publish(before);updated(0,expectedHost,device,tracker,sizeof(tracker));
-        rawOriginal=straddlingReadback;nextCommand=after;straddle=true;
+        hooks.rawOriginal=straddlingReadback;nextCommand=after;straddle=true;
         std::array<vr::TrackedDevicePose_t,16> poses{};
         rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
         require(!straddle && same(readback.Inspect(device).applied,after));
         require(flight::matrixError(poses[device].mDeviceToAbsoluteTracking,body)<1e-5);
-        rawOriginal=serverReadback;
+        hooks.rawOriginal=serverReadback;
     };
     checkStraddle(a,b);
-    harness::publish(c);originals[0]=readingOriginal;
+    harness::publish(c);hooks.originals[0]=readingOriginal;
     updated(0,expectedHost,device,tracker,sizeof(tracker));
-    originals[0]=storingOriginal;
+    hooks.originals[0]=storingOriginal;
     // Position alone cannot distinguish a rotation around the device itself.
     const double pivot[3]{physical.px,physical.py,physical.pz};
     checkStraddle(flight::aboutPivot({0,std::sin(0.3),0,std::cos(0.3),0,0,0},pivot),
         flight::aboutPivot({0,std::sin(0.3122),0,std::cos(0.3122),0,0,0},pivot));
     harness::publish(a);updated(0,expectedHost,device,tracker,sizeof(tracker));
     harness::publish(b);nextCommand=c;nestNext=true;
-    originals[0]=nestingOriginal;
+    hooks.originals[0]=nestingOriginal;
     updated(0,expectedHost,device,tracker,sizeof(tracker));
-    originals[0]=storingOriginal;
+    hooks.originals[0]=storingOriginal;
     require(!nestNext && readback.Inspect(device).reordered && same(readback.Inspect(device).applied,c));
     std::array<vr::TrackedDevicePose_t,16> poses{};
     rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
@@ -203,15 +203,15 @@ void generationTests(const vr::DriverPose_t& tracker,uint32_t device) {
     for(auto& classification:callerPolicy.anchoredDevices) classification.store(1);
     harness::publish(a);
     for(uint32_t d=0;d<12;d++) updated(0,expectedHost,d,tracker,sizeof(tracker));
-    nextCommand=b;rawOriginal=batchReadback;
+    nextCommand=b;hooks.rawOriginal=batchReadback;
     rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
-    rawOriginal=serverReadback;
+    hooks.rawOriginal=serverReadback;
     for(uint32_t d=0;d<12;d++) require(flight::matrixError(poses[d].mDeviceToAbsoluteTracking,body)<1e-5);
     std::puts("generations: straddled commit, uncommitted readback, orientation, reorder, twelve devices: passed");
 }
 }
 int main() {
-    originals[0]=fakeOriginal;
+    hooks.originals[0]=fakeOriginal;
     vr::DriverPose_t tracker{};
     tracker.qRotation={std::cos(0.2),0,std::sin(0.2),0};
     tracker.qWorldFromDriverRotation.w=tracker.qDriverFromHeadRotation.w=1;
@@ -225,7 +225,7 @@ int main() {
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     require(forwardedCount==1 && forwardedDevice==device && forwardedSize==sizeof(tracker));
     require(std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
-    require(!readback.Inspect(device).forwarding && same(readback.Inspect(device).applied,flight::Pose{}) && inFlight==0);
+    require(!readback.Inspect(device).forwarding && same(readback.Inspect(device).applied,flight::Pose{}) && hooks.inFlight==0);
 
     // Flight: the forwarded pose carries the command, which is committed only after
     // the original returns.
@@ -235,7 +235,7 @@ int main() {
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     const auto expected=flight::apply(tracker,flight);
     require(forwardedCount==2 && std::memcmp(&forwardedPose,&expected,sizeof(expected))==0);
-    require(!readback.Inspect(device).forwarding && same(readback.Inspect(device).applied,flight) && inFlight==0);
+    require(!readback.Inspect(device).forwarding && same(readback.Inspect(device).applied,flight) && hooks.inFlight==0);
     const auto body=flight::physical(tracker);
     require(readback.Inspect(device).physical[0]==body.px && readback.Inspect(device).physical[1]==body.py
         && readback.Inspect(device).physical[2]==body.pz);
@@ -252,7 +252,7 @@ int main() {
     updated(0,expectedHost,device,tracker,sizeof(tracker)-4);
     require(forwardedCount==4 && forwardedSize==sizeof(tracker)-4);
     require(std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
-    require(same(readback.Inspect(device).applied,flight::Pose{}) && inFlight==0);
+    require(same(readback.Inspect(device).applied,flight::Pose{}) && hooks.inFlight==0);
 
     std::puts("pose-update detour: identity pass-through, flight, pending/commit order, stale command, unknown ABI: passed");
 
