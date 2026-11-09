@@ -266,6 +266,48 @@ public class FlightSessionTests
         Assert.Equal(interrupted, sim.Current);
     }
 
+    [Theory]
+    [InlineData(0.1f, FlightMode.FreeFlight)]
+    [InlineData(0.5f, FlightMode.FreeFlight)]
+    [InlineData(0.9f, FlightMode.FreeFlight)]
+    [InlineData(0.1f, FlightMode.InfiniteWalking)]
+    [InlineData(0.5f, FlightMode.InfiniteWalking)]
+    [InlineData(0.9f, FlightMode.InfiniteWalking)]
+    public void DashboardCancelsPartialResetAtAppliedPoseThroughResume(float progress, FlightMode mode)
+    {
+        var sim = new Simulation(Tilted);
+        sim.Mode = mode;
+        sim.Tick(Neutral);
+        var result = sim.Session.Step(Neutral, progress, sim.Settings.Normalized(), true,
+            sim.Current, sim.Original, spaceResetRequested: true);
+        Assert.True(result.SpaceResetStarted);
+        var interrupted = Assert.IsType<RigidPose>(result.Offset);
+        Assert.NotEqual(Tilted, interrupted);
+        sim.Current = interrupted;
+
+        Assert.Null(sim.Tick(Neutral with { MotionSuspended = true }).Offset);
+        Assert.Null(sim.Tick(Neutral with { MotionSuspended = true }, 1).Offset);
+        Assert.Null(sim.Tick(Neutral).Offset);
+        Assert.Null(sim.Tick(Neutral, 1).Offset);
+        Assert.Equal(interrupted, sim.Current);
+    }
+
+    [Fact]
+    public void DashboardCancelsWalkingDescentAtAppliedPoseThroughResume()
+    {
+        var sim = new Simulation(Tilted);
+        sim.Tick(Neutral);
+        sim.Mode = FlightMode.InfiniteWalking;
+        sim.Tick(Neutral, 0.5f);
+        var interrupted = sim.Current;
+        Assert.NotEqual(Tilted, interrupted);
+
+        Assert.Null(sim.Tick(Neutral with { MotionSuspended = true }).Offset);
+        Assert.Null(sim.Tick(Neutral).Offset);
+        Assert.Null(sim.Tick(Neutral, 1).Offset);
+        Assert.Equal(interrupted, sim.Current);
+    }
+
     private static InputFrame Drag(float grip, float x) => Neutral with
     {
         Left = Neutral.Left with { Drag = grip, Pose = new(Quaternion.Identity, new(x, 0, 0)) }

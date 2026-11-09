@@ -154,6 +154,13 @@ internal sealed class FlightSession
         else
         {
             bool wasTransitioning = modeTransition is not null || spaceResetTransition is not null;
+            if (wasTransitioning)
+            {
+                // Transitions apply poses outside the manipulators. Resume from the last applied pose.
+                freeFlight.SetOffset(currentOffset);
+                infiniteWalking.SetOffset(currentOffset);
+                appliedMode = selectedMode;
+            }
             modeTransition = null;
             spaceResetTransition = null;
             infiniteWalking.Release();
