@@ -41,15 +41,15 @@ function gh {
     return 'Simulated GitHub success (no network request).'
 }
 
-function Run-Publish([DateTime]$Time = $jstDay) {
-    & $publishScript -Repository 'test-owner/test-repo' -Commit $commit -ArtifactDirectory $work -UtcNow $Time
+function Run-Publish([DateTime]$Time = $jstDay, [switch]$Prerelease) {
+    & $publishScript -Repository 'test-owner/test-repo' -Commit $commit -ArtifactDirectory $work -UtcNow $Time -Prerelease:$Prerelease
 }
 function Release-Calls([string]$Operation) {
     @($global:FlugelKranzReleaseTestState.Calls | Where-Object { $_[0] -eq 'release' -and $_[1] -eq $Operation })
 }
-function Expect-PublishFailure {
+function Expect-PublishFailure([switch]$Prerelease) {
     $failed = $false
-    try { Run-Publish } catch { $failed = $true }
+    try { Run-Publish -Prerelease:$Prerelease } catch { $failed = $true }
     Assert-ReleaseTest $failed 'Expected publishing to fail.'
 }
 
@@ -126,10 +126,56 @@ try {
     Assert-ReleaseTest (@(Release-Calls create).Count -eq 0) 'Daily sequence overflow must not create a release.'
 
     Reset-ReleaseTest
+    Run-Publish $jstDay.AddSeconds(-1) -Prerelease
+    $created = @(Release-Calls create)
+    Assert-ReleaseTest ($created[0][2] -eq 'PreRelease-2026110801') 'Wrong prerelease date before JST midnight.'
+
+    Reset-ReleaseTest
+    $global:FlugelKranzReleaseTestState.Releases = @(@{ tag_name = 'Release-2026110999'; target_commitish = $commit; draft = $false })
+    Run-Publish -Prerelease
+    $created = @(Release-Calls create)
+    Assert-ReleaseTest ($created.Count -eq 1 -and $created[0][2] -eq 'PreRelease-2026110901' -and $created[0] -contains '--prerelease=true' -and $created[0] -contains '--draft') 'Prerelease must use its own sequence and start as a prerelease draft.'
+    $edited = @(Release-Calls edit)
+    Assert-ReleaseTest ($edited[0][2] -eq 'PreRelease-2026110901' -and $edited[0] -contains '--draft=false' -and $edited[0] -contains '--prerelease=true' -and $edited[0] -contains '--latest=false') 'Prerelease must never replace the latest stable release.'
+
+    Reset-ReleaseTest
+    $global:FlugelKranzReleaseTestState.Refs = @(@{ ref = 'refs/tags/PreRelease-2026110901' })
+    $global:FlugelKranzReleaseTestState.Releases = @(@{ tag_name = 'PreRelease-2026110902'; target_commitish = $otherCommit; draft = $true })
+    Run-Publish -Prerelease
+    $created = @(Release-Calls create)
+    Assert-ReleaseTest ($created[0][2] -eq 'PreRelease-2026110903') 'Prerelease tags and drafts must reserve their sequence numbers.'
+
+    Reset-ReleaseTest
+    $global:FlugelKranzReleaseTestState.Releases = @(@{ tag_name = 'PreRelease-2026110801'; target_commitish = $commit; draft = $false })
+    Run-Publish -Prerelease
+    Assert-ReleaseTest (@(Release-Calls create).Count -eq 0 -and @(Release-Calls upload).Count -eq 0 -and @(Release-Calls edit).Count -eq 0) 'Published prerelease must not be republished.'
+    Run-Publish
+    $created = @(Release-Calls create)
+    $edited = @(Release-Calls edit)
+    Assert-ReleaseTest ($created.Count -eq 1 -and $created[0][2] -eq 'Release-2026110901' -and $edited[0] -contains '--prerelease=false' -and $edited[0] -contains '--latest') 'A prereleased commit must still be publishable as a separate stable release.'
+
+    Reset-ReleaseTest
+    $global:FlugelKranzReleaseTestState.Releases = @(@{ tag_name = 'PreRelease-2026110801'; target_commitish = $commit; draft = $true })
+    Run-Publish -Prerelease
+    $uploaded = @(Release-Calls upload)
+    $edited = @(Release-Calls edit)
+    Assert-ReleaseTest (@(Release-Calls create).Count -eq 0 -and $uploaded[0][2] -eq 'PreRelease-2026110801' -and $edited[0] -contains '--prerelease=true' -and $edited[0] -contains '--latest=false') 'Prerelease retry must preserve its name and preview status.'
+
+    Reset-ReleaseTest
+    $global:FlugelKranzReleaseTestState.Fail = 'upload'
+    Expect-PublishFailure -Prerelease
+    Assert-ReleaseTest (@(Release-Calls edit).Count -eq 0) 'Failed prerelease upload must not publish the draft.'
+
+    Reset-ReleaseTest
+    $global:FlugelKranzReleaseTestState.Refs = @(@{ ref = 'refs/tags/PreRelease-2026110999' })
+    Expect-PublishFailure -Prerelease
+    Assert-ReleaseTest (@(Release-Calls create).Count -eq 0) 'Daily prerelease sequence overflow must not create a release.'
+
+    Reset-ReleaseTest
     Add-Content -LiteralPath (Join-Path $work 'FlugelKranz.exe') -Value 'tampered'
     Expect-PublishFailure
     Assert-ReleaseTest ($global:FlugelKranzReleaseTestState.Calls.Count -eq 0) 'Invalid checksums must fail before any GitHub request.'
-    Write-Host 'Release workflow verification passed (10 cases, no network requests).'
+    Write-Host 'Release workflow verification passed (18 cases, no network requests).'
 } finally {
     Remove-Variable -Name FlugelKranzReleaseTestState -Scope Global -ErrorAction SilentlyContinue
 }

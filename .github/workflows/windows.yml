@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: windows-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -101,9 +101,9 @@ jobs:
           retention-days: 14
 
   release:
-    name: Release from main
+    name: Publish release or prerelease
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.event_name != 'pull_request'
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
@@ -117,9 +117,12 @@ jobs:
         with:
           name: FlugelKranz-win-x64-${{ github.sha }}
           path: artifacts/release
-      - name: Publish Release-yyyymmddNN
+      - name: Publish dated release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REPOSITORY: ${{ github.repository }}
           RELEASE_COMMIT: ${{ github.sha }}
-        run: ./.github/scripts/Publish-Release.ps1 -Repository $env:RELEASE_REPOSITORY -Commit $env:RELEASE_COMMIT -ArtifactDirectory artifacts/release
+          RELEASE_BRANCH: ${{ github.ref }}
+        run: |
+          $prerelease = $env:RELEASE_BRANCH -eq 'refs/heads/dev'
+          ./.github/scripts/Publish-Release.ps1 -Repository $env:RELEASE_REPOSITORY -Commit $env:RELEASE_COMMIT -ArtifactDirectory artifacts/release -Prerelease:$prerelease
