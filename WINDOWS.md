@@ -50,16 +50,24 @@ cd artifacts/windows-x64
 
 既定の出力は `artifacts/single-file/windows-x64/FlugelKranz.exe` です。単一EXE版でも `-Dotnet` と `-CMake` を指定できます。EXEだけを任意の場所へコピーして起動できます。WebView / Electron は使用せず、従来のAvalonia / Win32 UIです。
 
-初回のドライバー導入時は、SteamVRを終了し、EXEのあるフォルダーで次を実行します。
+**初回はSteamVRを終了した状態でEXEを開くだけで、ドライバーの展開・登録まで自動で行います。** 完了案内の後、SteamVRを起動してください。SteamVRのインストール先が未登録なら、SteamVRを一度起動・終了してからEXEを開き直します。
+
+登録済みのFlugelKranzドライバーが内蔵DLLと同じなら、その配置を継続して使用します。異なる場合は `%LOCALAPPDATA%/FlugelKranz/packages` の版ごとのフォルダーへ展開し、既存の `default.vrsettings` を引き継いで、新しい登録を確認してから旧版の登録を解除します。旧DLLや旧フォルダーは削除・上書きしません。他の名前のドライバーは登録解除の対象外です。
+
+登録変更が必要なときにSteamVRが起動していれば、自動準備を止めて終了を案内します。SteamVRを終了してEXEを開き直すと再試行します。準備に失敗した場合も、成功扱いでアプリの接続へ進まずエラーを表示します。SteamVRの終了・再起動は自動では行いません。
+
+`VR_PATHREG_OVERRIDE` を使う環境では、その登録ファイルを読み書きの両方に使用します。自動展開先も登録ファイルごとに分け、異なる環境のドライバー設定が混ざらないようにします。
+
+手動展開も引き続き利用できます。EXEのあるフォルダーで次を実行します。
 
 ```powershell
 ./FlugelKranz.exe --extract-package ./FlugelKranz-support
 ./FlugelKranz-support/install-driver.ps1
 ```
 
-展開先にはドライバー、登録スクリプト、説明書、ライセンスが入ります。`--extract-package` は展開のみで、SteamVRへの登録や再起動は行いません。既存の展開先には上書きしません。登録後はこのフォルダーを削除・移動せず、補正設定はその中の `driver/flugelkranz/resources/settings/default.vrsettings` で変更します。ドライバー更新時は新しいフォルダーへ展開し、従来と同様に旧登録を解除して新配置を登録してください。
+展開先にはドライバー、登録スクリプト、説明書、ライセンスが入ります。`--extract-package` は展開のみで、SteamVRへの登録や再起動は行いません。既存の展開先には上書きしません。登録後はこのフォルダーを削除・移動せず、補正設定はその中の `driver/flugelkranz/resources/settings/default.vrsettings` で変更します。自動登録は単一EXEの通常起動だけが対象です。`--help`、`--diagnose`、`--bindings`、`--extract-package` と従来のフォルダー配布版では実行しません。
 
-配布ファイルはEXE1本ですが、実行中もすべてをメモリー内だけで扱う方式ではありません。アプリ用ネイティブDLLは.NETがキャッシュへ展開します。SteamVRの入力設定は必要時に `%LOCALAPPDATA%/FlugelKranz/assets` へ展開し、アプリの実際の配置先を起動先として記録します。ドライバーはSteamVRがDLLとして読み込むため、上記の固定フォルダーへの展開・登録が必要です。既に登録済みのドライバーを起動だけで上書きすることはありません。
+配布ファイルはEXE1本ですが、実行中もすべてをメモリー内だけで扱う方式ではありません。アプリ用ネイティブDLLは.NETがキャッシュへ展開します。SteamVRの入力設定は必要時に `%LOCALAPPDATA%/FlugelKranz/assets` へ展開し、アプリの実際の配置先を起動先として記録します。ドライバーはSteamVRがDLLとして読み込むため、上記の固定フォルダーへ自動展開・登録します。
 
 配布物の検証は次で再実行できます。EXEだけを別名・別フォルダーへコピーして起動し、ドライバーとライセンスの展開、DLLハッシュ、既存先への上書き拒否を確認します。SteamVRへの登録・接続は行いません。検証先には新しいフォルダーを指定してください。
 

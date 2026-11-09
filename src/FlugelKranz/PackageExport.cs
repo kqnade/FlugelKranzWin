@@ -3,6 +3,19 @@ namespace FlugelKranz;
 /// <summary>Exports bundled driver/support files without registering or loading the driver.</summary>
 public static class PackageExport
 {
+    internal static string? DriverHash
+    {
+        get
+        {
+            var assembly = typeof(PackageExport).Assembly;
+            var name = assembly.GetManifestResourceNames().SingleOrDefault(name =>
+                name.Replace('\\', '/') == "Package/driver/flugelkranz/bin/win64/driver_flugelkranz.dll");
+            if (name is null) return null;
+            using var stream = assembly.GetManifestResourceStream(name)!;
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+        }
+    }
+
     public static void Export(string destination)
     {
         var assembly = typeof(PackageExport).Assembly;

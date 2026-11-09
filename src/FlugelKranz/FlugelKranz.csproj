@@ -24,6 +24,7 @@
   </Target>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="FlugelKranz.Tests" />
     <None Include="../../THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../LICENSE" Link="LICENSE" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../WINDOWS.md" Link="WINDOWS.md" CopyToPublishDirectory="PreserveNewest" />

@@ -3,6 +3,8 @@ using Avalonia;
 using FlugelKranz.OpenXR;
 using FlugelKranz.OpenVR;
 using FlugelKranz.Core;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace FlugelKranz;
 
@@ -106,6 +108,24 @@ internal static class Program
             }
             if (!OperatingSystem.IsWindows() && (!OperatingSystem.IsLinux() || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"))))
                 throw new InvalidOperationException("Linux の Wayland セッションが必要です（WAYLAND_DISPLAY が未設定）。");
+            if (OperatingSystem.IsWindows() && PackageExport.DriverHash is { } driverHash)
+            {
+                try
+                {
+                    var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    var pathsFile = SteamVrDriverRegistration.ResolvePathsFile(local, Environment.GetEnvironmentVariable("VR_PATHREG_OVERRIDE"));
+                    var setup = DriverSetup.Ensure(DriverSetup.InstallationRoot(local, pathsFile), driverHash,
+                        PackageExport.Export, new SteamVrDriverRegistration(pathsFile),
+                        IsSteamVrRunning);
+                    if (setup.Changed)
+                        MessageBoxW(0, "ドライバーの準備と登録が完了しました。SteamVRを起動してください。", "FlugelKranz", 0x40);
+                }
+                catch (Exception exception)
+                {
+                    MessageBoxW(0, exception.Message, "FlugelKranz — ドライバーの準備", 0x10);
+                    throw;
+                }
+            }
             return BuildAvaloniaApp().StartWithClassicDesktopLifetime([]);
         }
         catch (Exception exception)
@@ -114,6 +134,16 @@ internal static class Program
             return 1;
         }
     }
+
+    private static bool IsSteamVrRunning()
+    {
+        var processes = Process.GetProcessesByName("vrserver");
+        try { return processes.Length != 0; }
+        finally { foreach (var process in processes) process.Dispose(); }
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int MessageBoxW(nint owner, string text, string caption, uint type);
 
     public static AppBuilder BuildAvaloniaApp()
     {
