@@ -1,0 +1,125 @@
+name: Windows CI/CD
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  build:
+    name: Test and build Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore FlugelKranz.slnx
+
+      - name: Managed tests
+        run: dotnet test FlugelKranz.slnx --no-restore -m:1 -c Release --logger 'trx;LogFileName=managed.trx' --results-directory artifacts/ci/tests
+
+      - name: Test release automation without publishing
+        run: ./tests/Verify-ReleaseWorkflow.ps1
+
+      - name: Build single executable and native Release targets
+        run: ./build-windows.ps1 -SingleFile -OutputDirectory artifacts/ci/publish
+
+      - name: Native Release tests
+        run: ctest --test-dir artifacts/driver-build -C Release --output-on-failure --output-junit "$env:GITHUB_WORKSPACE/artifacts/ci/tests/native-release.xml"
+
+      - name: Build native Debug targets
+        run: cmake --build artifacts/driver-build --config Debug
+
+      - name: Native Debug tests
+        run: ctest --test-dir artifacts/driver-build -C Debug --output-on-failure --output-junit "$env:GITHUB_WORKSPACE/artifacts/ci/tests/native-debug.xml"
+
+      - name: Verify isolated executable without registering a driver
+        run: ./tests/Verify-SingleFile.ps1 -Executable artifacts/ci/publish/FlugelKranz.exe -ExpectedDriver artifacts/driver-build/Release/driver_flugelkranz.dll -WorkDirectory artifacts/ci/smoke
+
+      - name: Prepare release files
+        run: |
+          $release = 'artifacts/ci/release'
+          New-Item -ItemType Directory -Path $release | Out-Null
+          Copy-Item -LiteralPath artifacts/ci/publish/FlugelKranz.exe -Destination $release
+          git archive --format=zip --output="$release/FlugelKranz-source.zip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Source archive failed.' }
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the source commit.' }
+          $sdk = dotnet --version
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the SDK.' }
+          @{ commit = $commit; sdk = $sdk; runtime = 'win-x64'; configuration = 'Release' } |
+            ConvertTo-Json | Set-Content -LiteralPath "$release/build-info.json" -Encoding utf8NoBOM
+          $checksums = foreach ($name in @('FlugelKranz.exe', 'FlugelKranz-source.zip', 'build-info.json')) {
+            $hash = (Get-FileHash -LiteralPath "$release/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $name"
+          }
+          [IO.File]::WriteAllText((Join-Path (Get-Location) "$release/SHA256SUMS.txt"), ($checksums -join "`n") + "`n")
+
+      - name: Upload verified executable and source
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: FlugelKranz-win-x64-${{ github.sha }}
+          path: artifacts/ci/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: test-results-${{ github.sha }}
+          path: |
+            artifacts/ci/tests/*
+            artifacts/ci/smoke/*.txt
+            artifacts/driver-build/Testing/Temporary/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Release from main
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: FlugelKranz-win-x64-${{ github.sha }}
+          path: artifacts/release
+      - name: Publish Release-yyyymmddNN
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: ./.github/scripts/Publish-Release.ps1 -Repository $env:RELEASE_REPOSITORY -Commit $env:RELEASE_COMMIT -ArtifactDirectory artifacts/release

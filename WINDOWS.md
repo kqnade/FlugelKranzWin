@@ -150,6 +150,23 @@ SteamVR の `logs/vrserver.txt` にフックと `FrameAudit` のログが出ま�
 
 ## 開発と自動テスト
 
+### GitHub Actions（CI/CD）
+
+[Windows CI/CD](https://github.com/kqnade/FlugelKranzWin/actions/workflows/windows.yml) は、`dev` / `main` へのpushと、その2ブランチを対象とするPRで実行します。Actions画面からの手動実行もできます（ワークフローが既定ブランチへ入った後）。Windows x64上で次を確認します。
+
+- C#テスト、ネイティブRelease / Debugテスト。
+- ドライバー内蔵の単一EXEのビルド。
+- EXE単体の改名・移動後のヘルプ起動、内蔵ファイル展開、DLLハッシュ、上書き拒否。
+- リリース名の採番、再試行、公開前のハッシュ確認（テストではGitHubへの書き込みなし）。
+
+成功した実行のArtifactsから `FlugelKranz-win-x64-<commit>` をダウンロードできます。中身は単一の `FlugelKranz.exe`、対応ソースのZIP、ビルド情報、`SHA256SUMS.txt` です。テスト結果も14日間保存します。検証ではSteamVRの実登録・接続を行わず、Monadoサブモジュールも取得・更新しません。
+
+**リリース対象のトランクは `main` です。** `main`へのpushまたは`main`を指定した手動実行で全チェックが成功すると、`Release-yyyymmddNN` の名前・タグでGitHub Releaseを公開します。日付は日本時間、同日の連番は`01`から`99`です。例：`Release-2026110901`、`Release-2026110902`。`dev`とPRは成果物作成までで、リリースを公開しません。タグを手動で作る必要はありません。
+
+全ファイルを下書きへアップロードしてから公開します。同じコミットが公開済みなら二重公開せず、途中失敗で下書きが残った場合は同じリリース名で再試行します。公開済みのファイルは上書きしません。Releaseには検証済みEXE・ソース・ビルド情報・ハッシュを添付し、書き込み権限は公開ジョブだけに限定しています。
+
+以下はローカルでのテスト手順です。
+
 ```powershell
 dotnet restore FlugelKranz.slnx
 dotnet build FlugelKranz.slnx
@@ -157,6 +174,7 @@ dotnet test FlugelKranz.slnx
 cmake -S native/driver -B artifacts/driver-build -A x64
 cmake --build artifacts/driver-build --config Release
 ctest --test-dir artifacts/driver-build -C Release --output-on-failure
+./tests/Verify-ReleaseWorkflow.ps1
 ```
 
 C# テストは入力、座標合成、慣性、モード切替、追跡喪失、復元、設定、UI を検証します。ネイティブテストは姿勢・速度の変換、恒等変換時のパススルー、レイヤー情報の保持、フレーム姿勢の補間・予測を検証します。自動テストの成功と実機での表示品質は区別してください。

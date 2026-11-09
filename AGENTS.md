@@ -62,6 +62,8 @@ ctest --test-dir artifacts/driver-build -C Release --output-on-failure
 
 単一EXEの通常起動はドライバーの自動展開・登録を行います。同じDLLが登録済みなら再利用し、変更が必要ならSteamVR停止を要求します。検証で通常起動すると実環境の登録が変わるため、配布物の機械検証には `tests/Verify-SingleFile.ps1` を使い、登録処理のテストは代用の登録先で行います。
 
+`.github/workflows/windows.yml` はPR・dev・mainでテストと単一EXE生成を行います。mainだけが検証後に `Release-yyyymmddNN`（日本時間、同日01から）を自動公開するトランクです。公開処理は `.github/scripts/Publish-Release.ps1`、ネットワークに書き込まない検証は `tests/Verify-ReleaseWorkflow.ps1` です。Monadoのcheckout・submodule更新はCIでも不要です。
+
 コード変更では関連するビルドとテストを実行します。入力切替の再基準化、軸制約、回転支点、慣性、座標合成、追跡喪失、OFF と復元、フレーム時刻・画像情報の保持を検証してください。ドキュメントのみの変更ではリンク・コマンド・設定値と実装の一致、差分の検査を行います。実機操作は自動テスト成功だけで確認済みとしません。
 
 ## コーディング規約

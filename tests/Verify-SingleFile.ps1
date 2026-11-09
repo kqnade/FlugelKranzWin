@@ -4,6 +4,8 @@ param(
     [Parameter(Mandatory = $true)][string]$WorkDirectory
 )
 $ErrorActionPreference = 'Stop'
+# One child invocation deliberately fails; verify its code explicitly on every host.
+$PSNativeCommandUseErrorActionPreference = $false
 $Executable = (Resolve-Path -LiteralPath $Executable).Path
 $ExpectedDriver = (Resolve-Path -LiteralPath $ExpectedDriver).Path
 $WorkDirectory = [IO.Path]::GetFullPath($WorkDirectory)
@@ -47,3 +49,5 @@ try {
 } finally {
     $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = $previousCache
 }
+# GitHub's pwsh runner checks LASTEXITCODE after this script returns.
+$global:LASTEXITCODE = 0
