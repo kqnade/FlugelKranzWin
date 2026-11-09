@@ -58,6 +58,8 @@ ctest --test-dir artifacts/driver-build -C Release --output-on-failure
 
 `build-windows.ps1` は配布先へ書き込みます。使用中の配布アプリ・SteamVR を終了してから更新してください。`-Dotnet PATH -CMake PATH` で実行ファイルを指定できます。
 
+`build-windows.ps1 -SingleFile` はアプリとドライバー一式を `artifacts/single-file/windows-x64/FlugelKranz.exe` へ同梱します。既存出力には上書きせず、再ビルド先は `-OutputDirectory PATH` で変更できます。`--extract-package DIRECTORY` は内蔵ドライバー・文書の展開のみを行い、登録・SteamVR操作はしません。
+
 コード変更では関連するビルドとテストを実行します。入力切替の再基準化、軸制約、回転支点、慣性、座標合成、追跡喪失、OFF と復元、フレーム時刻・画像情報の保持を検証してください。ドキュメントのみの変更ではリンク・コマンド・設定値と実装の一致、差分の検査を行います。実機操作は自動テスト成功だけで確認済みとしません。
 
 ## コーディング規約

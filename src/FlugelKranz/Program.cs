@@ -38,8 +38,28 @@ internal static class Program
         root.Options.Add(bindingsOption);
         root.Options.Add(libraryOption);
         root.Options.Add(diagnoseOption);
+        var extractOption = new Option<string?>("--extract-package")
+        {
+            Description = "内蔵ドライバー・説明書・ライセンスを新しいフォルダーへ展開（登録はしません）",
+            HelpName = "DIRECTORY"
+        };
+        root.Options.Add(extractOption);
         root.SetAction(result =>
         {
+            if (result.GetValue(extractOption) is { } destination)
+            {
+                try
+                {
+                    PackageExport.Export(destination);
+                    Console.WriteLine($"ドライバー一式を展開しました: {Path.GetFullPath(destination)}");
+                    return 0;
+                }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine(exception.Message);
+                    return 1;
+                }
+            }
             MonadoLibraryPath = result.GetValue(libraryOption)!;
             return Run(result.GetValue(diagnoseOption), result.GetValue(bindingsOption));
         });

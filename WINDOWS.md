@@ -38,6 +38,35 @@ cd artifacts/windows-x64
 
 登録スクリプトは SteamVR の `vrpathreg` を使用します。SteamVR の終了・再起動や、自動起動設定の追加は行いません。SteamVR のアドオン管理でドライバーを無効化している場合は有効にしてください。
 
+### 単一EXE版
+
+アプリ・.NETランタイム・依存DLL・SteamVRドライバー・説明書・ライセンスを `FlugelKranz.exe` 1本に同梱できます。
+
+```powershell
+./build-windows.ps1 -SingleFile
+# 出力先を変更する場合（既存フォルダーへの上書きはしません）：
+# ./build-windows.ps1 -SingleFile -OutputDirectory artifacts/single-file/my-build
+```
+
+既定の出力は `artifacts/single-file/windows-x64/FlugelKranz.exe` です。単一EXE版でも `-Dotnet` と `-CMake` を指定できます。EXEだけを任意の場所へコピーして起動できます。WebView / Electron は使用せず、従来のAvalonia / Win32 UIです。
+
+初回のドライバー導入時は、SteamVRを終了し、EXEのあるフォルダーで次を実行します。
+
+```powershell
+./FlugelKranz.exe --extract-package ./FlugelKranz-support
+./FlugelKranz-support/install-driver.ps1
+```
+
+展開先にはドライバー、登録スクリプト、説明書、ライセンスが入ります。`--extract-package` は展開のみで、SteamVRへの登録や再起動は行いません。既存の展開先には上書きしません。登録後はこのフォルダーを削除・移動せず、補正設定はその中の `driver/flugelkranz/resources/settings/default.vrsettings` で変更します。ドライバー更新時は新しいフォルダーへ展開し、従来と同様に旧登録を解除して新配置を登録してください。
+
+配布ファイルはEXE1本ですが、実行中もすべてをメモリー内だけで扱う方式ではありません。アプリ用ネイティブDLLは.NETがキャッシュへ展開します。SteamVRの入力設定は必要時に `%LOCALAPPDATA%/FlugelKranz/assets` へ展開し、アプリの実際の配置先を起動先として記録します。ドライバーはSteamVRがDLLとして読み込むため、上記の固定フォルダーへの展開・登録が必要です。既に登録済みのドライバーを起動だけで上書きすることはありません。
+
+配布物の検証は次で再実行できます。EXEだけを別名・別フォルダーへコピーして起動し、ドライバーとライセンスの展開、DLLハッシュ、既存先への上書き拒否を確認します。SteamVRへの登録・接続は行いません。検証先には新しいフォルダーを指定してください。
+
+```powershell
+./tests/Verify-SingleFile.ps1 -Executable artifacts/single-file/windows-x64/FlugelKranz.exe -ExpectedDriver artifacts/driver-build/Release/driver_flugelkranz.dll -WorkDirectory artifacts/checks/single-file-smoke
+```
+
 ## フレーム姿勢補正の設定
 
 配置先の `driver/flugelkranz/resources/settings/default.vrsettings` を、SteamVR の起動前に設定します。実機で黒い縁・暗転の改善を確認した構成は次のとおりです。

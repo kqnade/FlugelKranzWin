@@ -8,12 +8,31 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <EmbeddedResource Include="../../LICENSE;../../THIRD-PARTY-NOTICES.txt;../../WINDOWS.md;../../README.md;../../UPSTREAM.md"
+                      LogicalName="Package/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../FlugelKranz.OpenVR/Vendor/LICENSE-OpenVR" LogicalName="Package/LICENSE-OpenVR" />
+    <EmbeddedResource Include="$(DriverPackageDirectory)/**/*" Condition="'$(DriverPackageDirectory)' != ''"
+                      LogicalName="Package/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Native NuGet packages ship external PDBs; managed symbols are embedded by the build script. -->
+  <Target Name="ExcludeSingleFileNativeSymbols" AfterTargets="ComputeFilesToPublish" Condition="'$(PublishSingleFile)' == 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <None Include="../../THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../LICENSE" Link="LICENSE" CopyToPublishDirectory="PreserveNewest" />
     <None Include="../../WINDOWS.md" Link="WINDOWS.md" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="..\FlugelKranz.OpenXR\FlugelKranz.OpenXR.csproj" />
     <ProjectReference Include="..\FlugelKranz.OpenVR\FlugelKranz.OpenVR.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <None Update="../../LICENSE;../../THIRD-PARTY-NOTICES.txt;../../WINDOWS.md" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
   <ItemGroup>

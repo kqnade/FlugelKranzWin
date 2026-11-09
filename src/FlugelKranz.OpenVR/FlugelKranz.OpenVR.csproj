@@ -5,10 +5,15 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Actions/*.json" LogicalName="OpenVrAssets/Actions/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="manifest.vrmanifest" LogicalName="OpenVrAssets/manifest.vrmanifest" />
     <ProjectReference Include="../FlugelKranz.Core/FlugelKranz.Core.csproj" />
     <None Include="Vendor/openvr_api.dll" Link="openvr_api.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="Vendor/LICENSE-OpenVR" Link="LICENSE-OpenVR" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Actions/*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="manifest.vrmanifest" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <None Update="Actions/*.json;manifest.vrmanifest;Vendor/LICENSE-OpenVR" CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>

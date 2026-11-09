@@ -33,9 +33,10 @@ internal sealed class OpenVrSession : IOpenVrSession
             input = Vr.Input ?? throw new InvalidOperationException("SteamVR Input が利用できません。");
             chaperone = Vr.ChaperoneSetup ?? throw new InvalidOperationException("Chaperone が利用できません。");
             var apps = Vr.Applications ?? throw new InvalidOperationException("SteamVR Applications が利用できません。");
-            CheckApplication(apps.AddApplicationManifest(Path.Combine(AppContext.BaseDirectory, "manifest.vrmanifest"), false), "AddApplicationManifest");
+            var assets = OpenVrAssets.Resolve();
+            CheckApplication(apps.AddApplicationManifest(assets.ApplicationManifest, false), "AddApplicationManifest");
             CheckApplication(apps.IdentifyApplication((uint)Environment.ProcessId, AppKey), "IdentifyApplication");
-            Check(input.SetActionManifestPath(Path.Combine(AppContext.BaseDirectory, "Actions", "actions.json")), "SetActionManifestPath");
+            Check(input.SetActionManifestPath(assets.ActionManifest), "SetActionManifestPath");
             ulong set = 0;
             Check(input.GetActionSetHandle("/actions/flight", ref set), "GetActionSetHandle");
             ulong pilotSet = 0;
