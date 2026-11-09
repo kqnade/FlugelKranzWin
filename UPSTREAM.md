@@ -1,6 +1,6 @@
 # 上流更新の追跡
 
-2026-10-02 に `ReinaS-64892/FlugelKranz` の `main` を `32126d6` まで確認しました。
+2026-11-09 に `ReinaS-64892/FlugelKranz` の `main` を `e9b0cac3291c47f84ad867642dec420b6fefe3d6` まで確認しました。前回の基準は `32126d6` です。
 上流の v1.0.0 タグは `79766ac` です。
 Windows 版の分岐元は `bba6ed1` です。Linux 側の変更を一括マージせず、Windows の入力・頭部操縦・独立 Drag・描画補正を維持して移植します。
 
@@ -34,8 +34,8 @@ xunit.v3 を 3.2.2、VSTest runner を検証済み 3.1.4 に戻し、Renovate �
 
 ```powershell
 git fetch upstream --no-recurse-submodules
-git log --oneline 32126d6..upstream/main
-git diff 32126d6 upstream/main -- src/FlugelKranz.Core tests
+git log --oneline e9b0cac..upstream/main
+git diff e9b0cac upstream/main -- src/FlugelKranz.Core tests
 ```
 
 確認後はこの基準コミットと取込み判断を更新します。追跡はこの記録による手動運用であり、自動マージや定期実行は設定していません。
@@ -103,3 +103,20 @@ Markup.Declarativeの公開拡張生成は将来のUI部品共有に使えます
 ### 9. 過去の失敗と保留
 
 過去のPR #7によるxUnit 4導入後、UIテストでMissingMethodExceptionが発生し、aece4d9で3系へ戻しています。今回も配布パッケージは3系に依存するため、#11は取り込まず制限を保持しました。4系の再採用には別途UIテストを含む互換性検証が必要です。
+## 2026-11-09 — Linux参照元の追加修正
+
+[比較範囲](https://github.com/ReinaS-64892/FlugelKranz/compare/32126d6...e9b0cac3291c47f84ad867642dec420b6fefe3d6)は9コミットです。
+
+| コミット | 判断 | 理由・対応 |
+| --- | --- | --- |
+| 52736e2 | 見送り | モード・遷移の型共通化。Windows固有の頭部操縦・OFF時Drag・SteamVR入力を含む制御構造は維持し、必要な修正だけ移植。 |
+| 2cbd8a4 | 見送り | 操作する手のflags enum化。挙動修正ではなく、今回の修正に必須ではない。 |
+| 1b6da75 | 移植 | 無限歩行復帰時の回転支点の横ずれを補正。開始時に支点を取得し、回転補間後の並進を計算して支点を垂直移動させる。 |
+| 9d43328 | 対象外 | Monado/OpenXRのデバイス校正を保持する修正。Windowsはドライバーの物理姿勢キャッシュとStanding変換を使うため該当しない。 |
+| 67e691f / 193e84c / bf72f53 | 対象外 | OpenXRのSteam Frameプロファイルとボタン割当。WindowsはSteamVRの論理アクションを使用し、上流の物理ボタン割当は導入しない。 |
+| 15eb318 / e9b0cac | 確認済み | 上記変更のマージコミット。 |
+
+移植元: [ReinaS-64892/FlugelKranz 1b6da75](https://github.com/ReinaS-64892/FlugelKranz/commit/1b6da75cb286b7037eb75b1a4537966b4349b337)。数学的な補正と5姿勢の回帰ケースを移植し、Windows側の制御ループへ適応しました。支点pに対して開始位置a0=O0(p)、着地点a1=(a0.X, Ob(p).Y, a0.Z)をsmoothstep補間し、姿勢R(u)に対する並進をa(u)-R(u)pとします。WindowsではStandingのY軸が基準です。
+
+遷移開始後の頭・手の移動によって支点を取り直しません。ダッシュボード表示・OFFによる中断と再開は既存Windows仕様を維持し、再開時には新しい遷移として支点を取得します。上流のセッション型への統合は行っていません。Monadoサブモジュール、入力割当、既定値、Electron/WebViewを含むUI基盤の変更はありません。
+検証: .NET SDK 10.0.401 / Releaseで205件成功（失敗0、スキップ0）。新規12ケースは支点の垂直軌道5姿勢、不正支点2件、制御ループを通したHMD・中点・左右/両手Dragの5件です。補正を一時的に外すと軌道テスト5件がすべて失敗し、復元後に全205件の成功を再確認しました。win-x64自己完結publishも成功（artifacts/upstream-publish）。コード・テストの静的レビューで追加の問題はありませんでした。VR実機検証は未実施です。

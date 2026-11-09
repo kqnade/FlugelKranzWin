@@ -317,6 +317,55 @@ public class FlightControllerTests
             s.LeftTrackpadForce == 0.42f && s.RightTrackpadForce == 0.87f));
     }
 
+    [Theory]
+    [InlineData(TurnOrigin.Head, 0)]
+    [InlineData(TurnOrigin.TrackedElementsMidpoint, 0)]
+    [InlineData(TurnOrigin.Head, 1)]
+    [InlineData(TurnOrigin.Head, 2)]
+    [InlineData(TurnOrigin.Head, 3)]
+    public async Task WalkingEntryCapturesConfiguredOrActiveDragPivot(TurnOrigin origin, int hands)
+    {
+        var current = new RigidPose(Quaternion.CreateFromYawPitchRoll(0.4f, 2.9f, -0.3f), new(1, 5, 3));
+        var frame = new InputFrame(new(Quaternion.Identity, new(0.4f, 1.7f, -0.2f)), true,
+            new(new(Quaternion.Identity, new(-0.3f, 1.2f, 0.1f)), 0, 0, 0, true),
+            new(new(Quaternion.Identity, new(0.6f, 1.1f, 0.4f)), 0, 0, 0, true));
+        var runtime = new FakeRuntime { Frame = frame };
+        runtime.Apply(current);
+        var settings = FreeFlightSettings() with
+        {
+            FreeFlight = FlightMotionSettings.Default with { HeadPilotEnabled = false, TurnOrigin = origin }
+        };
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.SetEnabled(true);
+        await WaitForFrame(runtime, frame);
+        frame = frame with
+        {
+            Left = frame.Left with { Drag = (hands & 1) != 0 ? 1 : 0 },
+            Right = frame.Right with { Drag = (hands & 2) != 0 ? 1 : 0 }
+        };
+        await WaitForFrame(runtime, frame);
+        if (hands != 0) await Wait(() => progress.Statuses.Any(s => s.Dragging));
+        Vector3 pivot = hands switch
+        {
+            1 => frame.Left.Pose.Position,
+            2 => frame.Right.Pose.Position,
+            3 => (frame.Left.Pose.Position + frame.Right.Pose.Position) / 2,
+            _ => origin == TurnOrigin.Head ? frame.Head.Position
+                : (frame.Head.Position + frame.Left.Pose.Position + frame.Right.Pose.Position) / 3
+        };
+        Vector3 start = runtime.CurrentOffset.Transform(pivot);
+        settings = settings with { Mode = FlightMode.InfiniteWalking };
+        await Wait(() => progress.Statuses.Any(s => s.Message.Contains("戻しています")));
+        Assert.Equal(start.X, runtime.CurrentOffset.Transform(pivot).X, 4);
+        Assert.Equal(start.Z, runtime.CurrentOffset.Transform(pivot).Z, 4);
+        // Tracking movement after entry must not change the captured physical pivot.
+        runtime.Frame = frame with { Head = frame.Head with { Position = new(2, 3, 4) } };
+        await Wait(() => MathF.Abs(runtime.CurrentOffset.Transform(pivot).Y - pivot.Y) < 0.0001f);
+        Assert.Equal(start.X, runtime.CurrentOffset.Transform(pivot).X, 4);
+        Assert.Equal(start.Z, runtime.CurrentOffset.Transform(pivot).Z, 4);
+    }
+
     private static InputFrame Frame(float grip, float x) => new(RigidPose.Identity, true,
         new(new(Quaternion.Identity, new(x, 0, 0)), grip, 0, 0, true),
         new(RigidPose.Identity, 0, 0, 0, true));

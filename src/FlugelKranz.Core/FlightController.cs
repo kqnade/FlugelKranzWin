@@ -220,7 +220,8 @@ public sealed class FlightController(
                             if (appliedMode == FlightMode.FreeFlight &&
                                 selectedMode == FlightMode.InfiniteWalking)
                             {
-                                modeTransition = new(runtime.CurrentOffset, runtime.OriginalOffset);
+                                modeTransition = new(runtime.CurrentOffset, runtime.OriginalOffset,
+                                    freeFlight.GetSingleHandTurnPivot(frame, settings.FreeFlight));
                                 spaceResetTransition = null;
                                 freeFlight.Release();
                                 infiniteWalking.Release();

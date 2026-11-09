@@ -6,6 +6,38 @@ namespace FlugelKranz.Tests;
 
 public class InfiniteWalkingTransitionTests
 {
+    // Adapted from ReinaS-64892/FlugelKranz 1b6da75.
+    [Theory]
+    [InlineData(0.5f, 0.3f)]
+    [InlineData(1.6f, -0.8f)]
+    [InlineData(2.8f, 1.4f)]
+    [InlineData(3.1415927f, 0f)]
+    [InlineData(0f, 3.1415927f)]
+    public void CapturedPivotFollowsVerticalLineThroughoutDescent(float pitch, float roll)
+    {
+        var original = new RigidPose(Quaternion.CreateFromYawPitchRoll(0.2f, -0.1f, 0.05f), new(2, 0.3f, -1));
+        var current = new RigidPose(
+            Quaternion.Normalize(Quaternion.CreateFromYawPitchRoll(0.7f, pitch, roll) * original.Orientation), new(6, 5, -4));
+        var pivot = new Vector3(0.8f, 1.6f, -0.4f);
+        Vector3 start = current.Transform(pivot);
+        float landingY = original.Transform(pivot).Y;
+        var transition = new InfiniteWalkingTransition(current, original, pivot);
+        for (int step = 1; step <= 10; step++)
+        {
+            Vector3 point = transition.Advance(0.1f).Transform(pivot);
+            float u = step / 10f;
+            float eased = u * u * (3 - 2 * u);
+            Assert.True(Vector3.Distance(new(start.X, start.Y + (landingY - start.Y) * eased, start.Z), point) < 0.0001f);
+        }
+        Assert.Equal(InfiniteWalkingTransition.CreateTarget(current, original, pivot), transition.Current);
+    }
+
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    public void RejectsInvalidPivot(float coordinate) =>
+        Assert.Throws<ArgumentException>(() => new InfiniteWalkingTransition(RigidPose.Identity, RigidPose.Identity, new(coordinate, 0, 0)));
+
     [Fact]
     public void TargetReturnsHeightAndTiltWhileKeepingYaw()
     {
