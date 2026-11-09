@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <algorithm>
 #include "FrameHistory.h"
 
@@ -21,7 +22,7 @@ std::array<flight::Pose,64> lastApplied{}; // protected by appliedGate
 std::array<flight::Pose,64> pendingApplied{}; // protected by appliedGate
 std::array<std::array<double,3>,64> pendingPhysical{}; // protected by appliedGate
 std::array<bool,64> forwarding{}; // protected by appliedGate
-struct Forward {uint64_t generation=0;flight::Pose transform,body;};
+struct Forward {uint64_t generation=0;flight::Pose transform;vr::DriverPose_t original{};double received=0;};
 static constexpr size_t forwardRing=8;
 std::array<std::array<Forward,forwardRing>,64> recentForwards{}; // protected by appliedGate
 std::array<uint64_t,64> startedGeneration{}; // protected by appliedGate
@@ -41,10 +42,12 @@ void tallyPick(ReadbackTally& tally,const flight::ReadbackPick& pick,bool differ
 // call, with no forward in flight and no out-of-order finish, gets the committed transform:
 // nothing reached vrserver in between. Any other device gets the best-scoring forward from
 // the one committed before the call to the newest started.
-void readbackByGeneration(vr::TrackedDevicePose_t* poses,uint32_t count,const std::array<uint64_t,64>& committedBefore,ReadbackTally& tally) {
-    struct Unsettled {uint32_t device=0;size_t count=0;bool different=false;std::array<flight::ReadbackCandidate,forwardRing+1> candidates{};};
+void readbackByGeneration(vr::TrackedDevicePose_t* poses,uint32_t count,const std::array<uint64_t,64>& committedBefore,
+    double queryTime,float prediction,ReadbackTally& tally) {
+    struct Unsettled {uint32_t device=0;size_t count=0;std::array<Forward,forwardRing+1> candidates{};};
     std::array<flight::Pose,64> applied;
-    std::array<Unsettled,64> unsettled; // every tracked device can change during a readback
+    // Keep capacity for every device, but initialize pose storage only for unsettled ones.
+    std::array<std::optional<Unsettled>,64> unsettled;
     size_t unsettledCount=0;
     const uint32_t devices=std::min<uint32_t>(count,64);
     {
@@ -54,7 +57,7 @@ void readbackByGeneration(vr::TrackedDevicePose_t* poses,uint32_t count,const st
             const uint64_t committed=committedGeneration[device].load(std::memory_order_relaxed);
             if(committed==committedBefore[device] && !forwardsInFlight[device] && !reordered[device]) continue;
             if(unsettledCount==unsettled.size()) {tally.overflow++;continue;}
-            auto& entry=unsettled[unsettledCount++];
+            auto& entry=unsettled[unsettledCount++].emplace();
             entry.device=device;entry.count=0;
             const uint64_t started=startedGeneration[device];
             uint64_t from=committedBefore[device];
@@ -63,21 +66,35 @@ void readbackByGeneration(vr::TrackedDevicePose_t* poses,uint32_t count,const st
             if(reordered[device] || forwardsInFlight[device]>0) from=started>=forwardRing?started-forwardRing+1:0;
             else if(started-from>=forwardRing) {from=started-forwardRing+1;tally.overflow++;} // the oldest are gone
             for(uint64_t generation=from;generation<=started;generation++) {
-                if(generation==0) {entry.candidates[entry.count++]={flight::Pose{},flight::Pose{}};continue;} // before any forward
+                if(generation==0) {entry.candidates[entry.count++]={};continue;} // before any forward
                 const auto& forward=recentForwards[device][generation%forwardRing];
-                if(forward.generation==generation) entry.candidates[entry.count++]={forward.transform,forward.body};
+                if(forward.generation==generation) entry.candidates[entry.count++]=forward;
             }
-            // Generation 0 has no body of its own; the body hardly moves between updates.
-            if(entry.count>1 && from==0) entry.candidates[0].body=entry.candidates[1].body;
+            // Generation 0 has no sample; approximate it with the first update's motion.
+            if(entry.count>1 && from==0) {
+                entry.candidates[0]=entry.candidates[1];
+                entry.candidates[0].transform=flight::Pose{};
+            }
             if(!entry.count || (entry.count==1 && from==0)) entry.count=0; // nothing to score against
         }
     }
     std::array<bool,64> settled;settled.fill(true);
     for(size_t i=0;i<unsettledCount;i++) {
-        auto& entry=unsettled[i];
+        auto& entry=*unsettled[i];
         if(!entry.count) continue;
+        std::array<flight::ReadbackCandidate,forwardRing+1> candidates;
+        size_t candidateCount=0;
+        for(size_t j=0;j<entry.count;j++) {
+            const auto& forward=entry.candidates[j];
+            // Predict all candidates to the same requested time, outside appliedGate.
+            const double dt=(queryTime-forward.received)/1000+prediction-forward.original.poseTimeOffset;
+            if(!std::isfinite(dt)) continue;
+            const auto body=flight::predictReadbackBody(forward.original,dt);
+            if(flight::valid(body)) candidates[candidateCount++]={forward.transform,body};
+        }
+        if(!candidateCount) continue;
         settled[entry.device]=false;
-        const auto pick=flight::pickReadback(poses[entry.device].mDeviceToAbsoluteTracking,entry.candidates.data(),entry.count);
+        const auto pick=flight::pickReadback(poses[entry.device].mDeviceToAbsoluteTracking,candidates.data(),candidateCount);
         tallyPick(tally,pick,pick.farther>0);
         flight::removeTransform(poses[entry.device],pick.transform);
     }
@@ -88,13 +105,14 @@ void readbackByGeneration(vr::TrackedDevicePose_t* poses,uint32_t count,const st
         for(uint32_t device=0;device<64;device++) result[device]=committedGeneration[device].load(std::memory_order_acquire);
         return result;
     }
-    uint64_t BeginForward(uint32_t device,Pose transform,Pose body) {
+    uint64_t BeginForward(uint32_t device,Pose transform,const vr::DriverPose_t& original,double received) {
+        const auto body=physical(original);
         std::lock_guard<std::mutex> lock(appliedGate);
         pendingApplied[device]=transform;
         pendingPhysical[device]={body.px,body.py,body.pz};
         forwarding[device]=true;
         const auto generation=++startedGeneration[device];
-        recentForwards[device][generation%forwardRing]={generation,transform,body};
+        recentForwards[device][generation%forwardRing]={generation,transform,original,received};
         forwardsInFlight[device]++;
         return generation;
     }

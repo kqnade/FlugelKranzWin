@@ -1,6 +1,14 @@
 // Drive the real pose-update detour with a fake original, without starting SteamVR.
 // There is no shared memory here (state stays null), so updated() runs on `command`.
+#include "FrameCorrection.h"
+namespace flight {
+double scriptedReadbackTime=0;
+double readbackTestTimeMs() {return scriptedReadbackTime?scriptedReadbackTime:frameTimeMs();}
+}
+// Replace only the detour's clock, after FrameCorrection's clock has been defined.
+#define frameTimeMs readbackTestTimeMs
 #include "Driver.cpp"
+#undef frameTimeMs
 #include "DriverHarness.h"
 #include <cstdlib>
 namespace {
@@ -209,6 +217,97 @@ void generationTests(const vr::DriverPose_t& tracker,uint32_t device) {
     for(uint32_t d=0;d<12;d++) require(flight::matrixError(poses[d].mDeviceToAbsoluteTracking,body)<1e-5);
     std::puts("generations: straddled commit, uncommitted readback, orientation, reorder, twelve devices: passed");
 }
+
+vr::TrackedDevicePose_t predictedPhysical{};
+float expectedPrediction=0;
+void predictedStraddlingReadback(void* host,float prediction,vr::TrackedDevicePose_t* poses,uint32_t count) {
+    require(prediction==expectedPrediction);
+    serverReadback(host,prediction,poses,count);
+    // This server fixture predicts constant X velocity independently of the matcher.
+    poses[nextDevice].mDeviceToAbsoluteTracking.m[0][3]+=prediction;
+    predictedPhysical=poses[nextDevice];
+    predictedPhysical.mDeviceToAbsoluteTracking.m[0][3]-=3;
+    flight::scriptedReadbackTime=1010;
+    harness::publish(nextCommand);
+    updated(0,expectedHost,nextDevice,nextTracker,sizeof(nextTracker));
+}
+void predictedGenerationTests(vr::DriverPose_t tracker,uint32_t device) {
+    harness::servePhysicalPosesToThisProcess();
+    hooks.originals[0]=storingOriginal;hooks.rawOriginal=predictedStraddlingReadback;
+    tracker.vecVelocity[0]=1;
+    nextDevice=device;nextTracker=tracker;
+    for(float prediction:{0.02f,-0.02f}) {
+        readback.Reset();
+        flight::scriptedReadbackTime=1000;
+        expectedPrediction=prediction;
+        const flight::Pose before{0,0,0,1,3,0,0};
+        nextCommand={0,0,0,1,3+prediction*0.95,0,0};
+        harness::publish(before);updated(0,expectedHost,device,tracker,sizeof(tracker));
+        std::array<vr::TrackedDevicePose_t,16> poses{};
+        rawPoses(expectedHost,prediction,poses.data(),static_cast<uint32_t>(poses.size()));
+        // Wrong generation removes 19 mm too much; prediction itself must survive removal.
+        require(positionError(poses[device].mDeviceToAbsoluteTracking,predictedPhysical.mDeviceToAbsoluteTracking)<1e-5);
+        require(poses[device].vVelocity.v[0]==1);
+    }
+    flight::scriptedReadbackTime=0;
+    hooks.rawOriginal=serverReadback;
+    std::puts("predicted readback: positive and negative prediction across generation changes: passed");
+}
+void anchoredUpdateTests() {
+    readback.Reset();physicalHeadValid=false;
+    for(auto& classification:callerPolicy.anchoredDevices) classification.store(0);
+    std::snprintf(callerPolicy.hmdAnchoredSystems,sizeof(callerPolicy.hmdAnchoredSystems),"%s","SlimeVR");
+    harness::context().properties.trackingSystems={{5,"slimevr"},{6,"lighthouse"}};
+    callerPolicy.propertiesReady=true;
+    hooks.originals[0]=storingOriginal;hooks.rawOriginal=serverReadback;
+    const double h=std::sqrt(0.5);
+    const flight::Pose command{0,h,0,h,10,20,30};
+    harness::publish(command);
+    vr::DriverPose_t tracker{};
+    tracker.qRotation.w=tracker.qWorldFromDriverRotation.w=tracker.qDriverFromHeadRotation.w=1;
+    tracker.poseIsValid=tracker.deviceIsConnected=true;
+    tracker.vecPosition[0]=14;tracker.vecPosition[1]=20;tracker.vecPosition[2]=29;
+    tracker.vecVelocity[0]=1;
+    // No physical HMD has arrived: an anchored solver pose must pass through untouched.
+    updated(0,expectedHost,5,tracker,sizeof(tracker));
+    require(std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
+
+    auto head=tracker;
+    head.vecPosition[0]=1;head.vecPosition[1]=2;head.vecPosition[2]=3;
+    updated(0,expectedHost,0,head,sizeof(head));
+    auto output=flight::physical(forwardedPose);
+    require(std::abs(output.px-13)<1e-9 && std::abs(output.py-22)<1e-9 && std::abs(output.pz-29)<1e-9);
+    updated(0,expectedHost,5,tracker,sizeof(tracker));
+    output=flight::physical(forwardedPose);
+    // Flown HMD (13,22,29) + Y90 * solver-relative vector (1,-2,0).
+    require(std::abs(output.px-13)<1e-9 && std::abs(output.py-20)<1e-9 && std::abs(output.pz-28)<1e-9);
+    require(std::abs(output.y-h)<1e-9 && std::abs(output.w-h)<1e-9);
+    require(std::abs(forwardedPose.vecVelocity[0])<1e-9 && std::abs(forwardedPose.vecVelocity[2]+1)<1e-9);
+    require(same(ipc.state->samples[5].pose,flight::physical(tracker)));
+
+    harness::servePhysicalPosesToThisProcess();
+    std::array<vr::TrackedDevicePose_t,16> poses{};
+    rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
+    require(flight::matrixError(poses[5].mDeviceToAbsoluteTracking,flight::matrix(flight::physical(tracker)))<1e-6);
+    require(std::abs(poses[5].vVelocity.v[0]-1)<1e-6 && std::abs(poses[5].vVelocity.v[2])<1e-6);
+
+    // A later physical HMD update changes the anchor used by the actual tracker detour.
+    head.vecPosition[0]=2;head.vecPosition[1]=3;head.vecPosition[2]=4;
+    updated(0,expectedHost,0,head,sizeof(head));
+    updated(0,expectedHost,5,tracker,sizeof(tracker));
+    output=flight::physical(forwardedPose);
+    require(std::abs(output.px-15)<1e-9 && std::abs(output.py-20)<1e-9 && std::abs(output.pz-28)<1e-9);
+    // An unlisted tracking system still receives the full flight transform.
+    updated(0,expectedHost,6,tracker,sizeof(tracker));
+    output=flight::physical(forwardedPose);
+    require(std::abs(output.px-39)<1e-9 && std::abs(output.py-40)<1e-9 && std::abs(output.pz-16)<1e-9);
+    // Translation-only flight has already been included by the anchored solver.
+    harness::publish({0,0,0,1,10,20,30});
+    updated(0,expectedHost,5,tracker,sizeof(tracker));
+    require(std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
+    callerPolicy.hmdAnchoredSystems[0]=0;
+    std::puts("anchored update: missing HMD, flown pivot, refreshed head, IPC input, readback, unlisted system, translation: passed");
+}
 }
 int main() {
     hooks.originals[0]=fakeOriginal;
@@ -258,4 +357,6 @@ int main() {
 
     harnessTests(tracker,device);
     generationTests(tracker,device);
+    predictedGenerationTests(tracker,device);
+    anchoredUpdateTests();
 }

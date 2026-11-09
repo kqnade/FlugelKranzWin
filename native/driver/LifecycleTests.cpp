@@ -26,7 +26,7 @@ int main() {
     require(ipc.state!=nullptr);
     new(ipc.state) flight::State{};
     ipc.command.px=3;ipc.lastHeartbeat=123;
-    readback.CommitForward(0,readback.BeginForward(0,ipc.command,flight::Pose{}),ipc.command);
+    readback.CommitForward(0,readback.BeginForward(0,ipc.command,vr::DriverPose_t{},0),ipc.command);
     physicalHeadValid=true;callerPolicy.propertiesReady=true;
     callerPolicy.anchoredDevices[0]=2;
     callerPolicy.physicalCallSites[0]=reinterpret_cast<void*>(1);

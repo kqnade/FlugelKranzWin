@@ -39,10 +39,11 @@ void rawPoses(void* host,float prediction,vr::TrackedDevicePose_t* poses,uint32_
     CallbackScope scope{hooks};
     const auto caller=_ReturnAddress();
     const auto committedBefore=readback.CaptureCommitted();
+    const auto queryTime=frameTimeMs();
     hooks.rawOriginal(host,prediction,poses,count);
     if(!poses || !count || !callerPolicy.servesPhysicalPoses(caller)) return;
     flight::PoseReadbackHistory::ReadbackTally tally;
-    readback.readbackByGeneration(poses,count,committedBefore,tally);
+    readback.readbackByGeneration(poses,count,committedBefore,queryTime,prediction,tally);
 }
 bool physicalHeadValid=false; // protected by gate
 
@@ -161,7 +162,7 @@ void updated(int index,void* host,uint32_t device,const vr::DriverPose_t& input,
             transform=physicalHeadValid?flight::aboutPivot(ipc.command,flownHead):flight::Pose{};
         }
         output=flight::apply(input,transform);
-        if(device<64) generation=readback.BeginForward(device,transform,flight::physical(input));
+        if(device<64) generation=readback.BeginForward(device,transform,input,received);
         if(device==0 && frameCorrection.correctFramePose) {
             frameCorrection.Add(received,output,ipc.command,&input);
         }

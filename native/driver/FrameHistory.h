@@ -62,6 +62,19 @@ inline ReadbackPick readbackPick(const vr::HmdMatrix34_t& readback,Pose previous
 }
 // A transform vrserver may hold for a device, with the physical body pose its update carried.
 struct ReadbackCandidate {Pose transform,body;};
+// Predict in driver space before composing world/head calibration. In particular,
+// a nonzero head/IMU lever arm moves when the body rotates. OpenVR uses velocities,
+// not accelerations, for this prediction; negative prediction times are supported.
+inline Pose predictReadbackBody(vr::DriverPose_t p,double dt) {
+    for(int i=0;i<3;i++) p.vecPosition[i]+=p.vecVelocity[i]*dt;
+    const double speed=std::sqrt(p.vecAngularVelocity[0]*p.vecAngularVelocity[0]
+        +p.vecAngularVelocity[1]*p.vecAngularVelocity[1]+p.vecAngularVelocity[2]*p.vecAngularVelocity[2]);
+    if(speed!=0) {
+        const double s=std::sin(speed*dt/2)/speed;
+        p.qRotation=multiply({std::cos(speed*dt/2),s*p.vecAngularVelocity[0],s*p.vecAngularVelocity[1],s*p.vecAngularVelocity[2]},p.qRotation);
+    }
+    return physical(p);
+}
 // Distance from the readback with `transform` removed to `body`, position and orientation
 // both: 1 is about 5 mm or 0.6 degrees. Orientation tells candidates apart when a rotation
 // about the device itself (head-pilot turns about the HMD) leaves the positions equal.
