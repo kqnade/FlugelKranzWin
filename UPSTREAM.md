@@ -39,3 +39,67 @@ git diff 32126d6 upstream/main -- src/FlugelKranz.Core tests
 ```
 
 確認後はこの基準コミットと取込み判断を更新します。追跡はこの記録による手動運用であり、自動マージや定期実行は設定していません。
+
+## 2026-11-09 — Renovate 更新
+
+### 1. ライブラリの概要
+
+Avalonia はネイティブ描画の UI、Markup.Declarative は C# による UI 記述、System.CommandLine は起動引数、Evergine.Bindings.OpenXR は残存 OpenXR 経路、Microsoft.NET.Test.Sdk はテスト実行基盤です。Electron / WebView は導入していません。
+
+### 2. バージョン情報
+
+| PR | 対象 | 更新前 → 更新後 | 判断 |
+| --- | --- | --- | --- |
+| [#8](https://github.com/kqnade/FlugelKranzWin/pull/8) | Microsoft.NET.Test.Sdk | 18.10.0 → 18.11.0 | 取込み |
+| [#9](https://github.com/kqnade/FlugelKranzWin/pull/9) | Avalonia Desktop / Wayland / Fluent / Headless.XUnit | 12.1.2 → 12.1.5 | 取込み |
+| [#10](https://github.com/kqnade/FlugelKranzWin/pull/10) | Evergine.Bindings.OpenXR | 2026.9.1.18 → 2026.11.4.23 | 取込み |
+| [#11](https://github.com/kqnade/FlugelKranzWin/pull/11) | xunit.v3 / runner | PRは4.0.3 / 4.0.1を提案 | 保留。ローカルの3.2.2 / 3.1.4を維持 |
+| [#12](https://github.com/kqnade/FlugelKranzWin/pull/12) | System.CommandLine | 2.0.12 → 2.0.14 | 取込み |
+| [#13](https://github.com/kqnade/FlugelKranzWin/pull/13) | Avalonia.Markup.Declarative | 12.1.1 → 12.2.0 | 取込み |
+
+今回採用した更新にメジャー変更はありません。対象は上記Renovate提案に限定し、全パッケージの最新メジャー調査は行っていません。
+
+### 3. 変更スコープ
+
+3つのcsproj、配布用THIRD-PARTY-NOTICES.txt、Renovate制限の説明を更新しました。アプリケーションコード・テストコード・Monadoサブモジュールは変更していません。NuGetロックファイルはありません。復元されたアプリ依存一覧と第三者通知の版数を照合しました。
+
+### 4. 依存関係
+
+Avalonia関連の間接依存も12.1.5へ揃います。SkiaSharp 3.119.4、HarfBuzzSharp 8.3.1.3などの描画依存は従来どおりです。Test.Sdkに伴いTestHostとCodeCoverageが18.11.0になります。
+配布されたAvalonia.Headless.XUnit 12.1.5のnuspecはxunit.v3.extensibility.core 3.2.2を参照しています。Markup.Declarative 12.2.0のAvalonia下限は12.1.1で、アプリの12.1.5と整合します。OpenXRバインディングとSystem.CommandLineの使用対象フレームワークには追加NuGet依存がありません。
+
+### 5. 使用箇所
+
+- src/FlugelKranz/FlugelKranz.csproj: UIとCLIの直接依存。
+- src/FlugelKranz.OpenXR/FlugelKranz.OpenXR.csproj: OpenXRバインディング。
+- tests/FlugelKranz.Tests/FlugelKranz.Tests.csproj: UIテストとテスト実行基盤。
+- THIRD-PARTY-NOTICES.txt: 配布するアプリ依存の版数とライセンス。
+- renovate.json: xUnit 4未満の互換性制限。
+- UPSTREAM.md: 過去の版数は当時の検証記録として保持。
+
+### 6. 公式変更内容
+
+[Avalonia 12.1.3](https://github.com/AvaloniaUI/Avalonia/releases/tag/12.1.3)（9月22日）、[12.1.4](https://github.com/AvaloniaUI/Avalonia/releases/tag/12.1.4)（10月9日）、[12.1.5](https://github.com/AvaloniaUI/Avalonia/releases/tag/12.1.5)（11月2日）のリリースノートを確認。Headless起動・終了競合、テーマ切替、コマンド付きButtonのリーク、Windows入力などの修正を含みます。
+[Markup.Declarative 12.2.0](https://github.com/AvaloniaCommunity/Avalonia.Markup.Declarative/releases/tag/v12.2.0)（11月3日）は公開拡張生成・重複警告と画素形式の修正です。
+[Test.Sdk 18.10.1](https://github.com/microsoft/vstest/releases/tag/v18.10.1)（9月15日）と[18.11.0](https://github.com/microsoft/vstest/releases/tag/v18.11.0)（10月13日）はカバレッジ出力分離、ログ・引数処理、MTP testhostの既定無効化などを含みます。
+[OpenXRの配布元コミット差分](https://github.com/EvergineTeam/OpenXR.NET/compare/a857a6d6f79be5ea1a3c3d18eda6cf07b05951e1...41ff2f5b85487c1f02733969403a750f92dedbdf)はレジストリ再生成と別名エントリーポイント生成修正を含みます。
+System.CommandLine 2.0.13 / 2.0.14の個別リリースノートは取得した公式リリース一覧では確認できませんでした。配布nuspecの出典はdotnet/dotnetの0427b9abbead3fa64c6655eb4290c537397131faです。全更新の旧版・新版公開日時および中間版の個別変更の完全な確認は未実施です。
+
+### 7. コード・設定と検証
+
+API移行を必要とするビルドエラーはありません。版数の参照箇所と通知を更新し、既存テストを変更せず検証しました。
+
+- .NET SDK 10.0.401、Releaseビルド: 警告0、エラー0。
+- Releaseテスト: 193件成功、失敗0、スキップ0。3件のAvaloniaFactを含む。
+- win-x64自己完結publish: 成功。出力先はartifacts/renovate-publish。
+- CLI: --helpは終了コード0、値を欠いた--lib-monadoは終了コード1。
+- 制限された実行環境ではNuGetのDNS解決とテスト完了に問題があったため、パッケージ取得・テストは通常環境で再実行。
+- VR実機、Linux経路、ネイティブドライバーの再検証は未実施。配布先への上書き・SteamVR再起動は行っていません。
+
+### 8. 今後利用できる変更
+
+Markup.Declarativeの公開拡張生成は将来のUI部品共有に使えますが、今回の更新では利用コードを追加していません。
+
+### 9. 過去の失敗と保留
+
+過去のPR #7によるxUnit 4導入後、UIテストでMissingMethodExceptionが発生し、aece4d9で3系へ戻しています。今回も配布パッケージは3系に依存するため、#11は取り込まず制限を保持しました。4系の再採用には別途UIテストを含む互換性検証が必要です。

@@ -5,7 +5,7 @@
   ],
   "packageRules": [
     {
-      "description": "Avalonia.Headless.XUnit 12.1.2 uses xUnit v3 APIs; validate compatibility before adopting xUnit 4.",
+      "description": "Avalonia.Headless.XUnit 12.1.5 depends on xunit.v3.extensibility.core 3.2.2; validate compatibility before adopting xUnit 4.",
       "matchPackageNames": [
         "xunit.v3",
         "xunit.runner.visualstudio"
