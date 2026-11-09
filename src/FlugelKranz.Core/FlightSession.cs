@@ -38,10 +38,20 @@ internal sealed class FlightSession
         return gesture;
     }
 
-    public void ReleaseInputs()
+    public void ReleaseInputs(RigidPose currentOffset)
     {
-        freeFlight.Release();
-        infiniteWalking.Release();
+        if (spaceResetTransition is not null)
+        {
+            // The manipulators still hold the pre-transition pose until completion.
+            // Rebase to the last successful runtime write before cancelling the reset.
+            freeFlight.SetOffset(currentOffset);
+            infiniteWalking.SetOffset(currentOffset);
+        }
+        else
+        {
+            freeFlight.Release();
+            infiniteWalking.Release();
+        }
         spaceResetTransition = null;
     }
 

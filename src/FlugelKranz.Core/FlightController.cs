@@ -147,7 +147,7 @@ public sealed class FlightController(
                     }
                     if (observedVersion != releaseVersion)
                     {
-                        session.ReleaseInputs();
+                        session.ReleaseInputs(runtime.CurrentOffset);
                         observedVersion = releaseVersion;
                     }
                     if (resetRequested)

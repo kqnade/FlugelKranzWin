@@ -179,9 +179,7 @@ public class FlightSessionTests
         if (action == "off") sim.Enabled = false;
         var frame = one with { MotionSuspended = action == "dashboard" };
         var result = sim.Tick(frame, 0, release: action == "off");
-        // Preserve the existing OFF path: ReleaseInputs clears the partial transition before
-        // Drag-only sees it, so the manipulator resumes its pre-reset offset. Fix separately.
-        Assert.Equal(action == "off" ? Tilted : interrupted, sim.Current);
+        Assert.Equal(interrupted, sim.Current);
         Assert.NotEqual(FlightActivity.ResettingSpace, result.State.Activity);
         Assert.False(result.SpaceResetStarted);
     }
@@ -239,6 +237,35 @@ public class FlightSessionTests
         Assert.Equal(expected, sim.Tick(frame).State.Activity);
     }
 
+    [Theory]
+    [InlineData(0.1f, FlightMode.FreeFlight, true)]
+    [InlineData(0.5f, FlightMode.FreeFlight, true)]
+    [InlineData(0.9f, FlightMode.FreeFlight, true)]
+    [InlineData(0.5f, FlightMode.FreeFlight, false)]
+    [InlineData(0.5f, FlightMode.InfiniteWalking, true)]
+    public void OffCancelsPartialResetAtAppliedPoseAndReenableDoesNotResumeIt(
+        float progress, FlightMode mode, bool dragEnabled)
+    {
+        var sim = new Simulation(Tilted);
+        sim.Mode = mode;
+        sim.Settings = sim.Settings with { FreeFlight = sim.Settings.FreeFlight with { DragEnabled = dragEnabled } };
+        sim.Tick(Neutral);
+        // Start a partial reset directly so its progression is independent of the hold timer.
+        var result = sim.Session.Step(Neutral, progress, sim.Settings.Normalized(), true,
+            sim.Current, sim.Original, spaceResetRequested: true);
+        Assert.True(result.SpaceResetStarted);
+        var interrupted = Assert.IsType<RigidPose>(result.Offset);
+        Assert.NotEqual(Tilted, interrupted);
+        sim.Current = interrupted;
+        sim.Enabled = false;
+        Assert.Null(sim.Tick(Neutral, release: true).Offset);
+        Assert.Null(sim.Tick(Neutral, 1).Offset);
+        sim.Enabled = true;
+        Assert.Null(sim.Tick(Neutral, release: true).Offset);
+        Assert.Null(sim.Tick(Neutral, 1).Offset);
+        Assert.Equal(interrupted, sim.Current);
+    }
+
     private static InputFrame Drag(float grip, float x) => Neutral with
     {
         Left = Neutral.Left with { Drag = grip, Pose = new(Quaternion.Identity, new(x, 0, 0)) }
@@ -248,7 +275,7 @@ public class FlightSessionTests
     private sealed class Simulation
     {
         public FlightSession Session { get; }
-        public RigidPose Current { get; private set; }
+        public RigidPose Current { get; set; }
         public RigidPose Original { get; }
         public bool Enabled { get; set; } = true;
         public FlugelKranzSettings Settings { get; set; } = FlugelKranzSettings.Default with
@@ -267,7 +294,7 @@ public class FlightSessionTests
         {
             var settings = Settings.Normalized();
             var gesture = Session.PrepareInput(frame, dt, settings.Mode);
-            if (release) Session.ReleaseInputs();
+            if (release) Session.ReleaseInputs(Current);
             if (reset)
             {
                 Current = Original;

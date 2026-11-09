@@ -432,7 +432,7 @@ public class FlightControllerTests
     }
 
     [Fact]
-    public async Task OffDuringPartialResetPreservesLegacyDragBaseline()
+    public async Task OffDuringPartialResetPreservesLastAppliedPose()
     {
         var baseline = new RigidPose(Quaternion.CreateFromYawPitchRoll(0.4f, 0.7f, -0.3f), new(1, 2, 3));
         var runtime = new FakeRuntime();
@@ -443,10 +443,16 @@ public class FlightControllerTests
         await Wait(() => progress.Statuses.Any(s => s.Connected));
         runtime.Frame = DpadFrame(1, 0);
         await Wait(() => progress.Statuses.Any(s => s.Message.Contains("水平へ戻しています")));
-        runtime.BeforeNextRead = () => controller.SetEnabled(false);
+        RigidPose interrupted = default;
+        runtime.BeforeNextRead = () =>
+        {
+            interrupted = runtime.CurrentOffset;
+            controller.SetEnabled(false);
+        };
         int reads = runtime.Reads;
         await Wait(() => runtime.Reads > reads + 2);
-        Assert.Equal(baseline, runtime.CurrentOffset);
+        Assert.NotEqual(baseline, interrupted);
+        Assert.Equal(interrupted, runtime.CurrentOffset);
     }
 
     [Fact]
