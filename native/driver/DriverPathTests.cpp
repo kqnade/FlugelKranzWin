@@ -26,8 +26,8 @@ void fakeOriginal(void* host,uint32_t device,const vr::DriverPose_t& pose,uint32
     require(same(readback.Inspect(device).applied,expectedCommitted));
 }
 void keepCommand(flight::Pose transform) {
-    command=transform;
-    lastHeartbeat=GetTickCount64(); // refresh() drops a command older than 500 ms
+    ipc.command=transform;
+    ipc.lastHeartbeat=GetTickCount64(); // ipc.refresh() drops a ipc.command older than 500 ms
 }
 // What vrserver holds for the readback: the last pose forwarded per device.
 std::array<vr::TrackedDevicePose_t,16> serverPoses{};
@@ -62,7 +62,7 @@ void harnessTests(const vr::DriverPose_t& tracker,uint32_t device) {
     harness::shippedDefaults();
     loadSettings();
     require(context.log.contains("FlugelKranz flags: observeFrames=1 correctFramePose=1 timeBasedFramePose=1"));
-    require(std::strcmp(physicalPoseDrivers,"driver_slimevr.dll,driver_rebocap.dll")==0);
+    require(std::strcmp(callerPolicy.physicalPoseDrivers,"driver_slimevr.dll,driver_rebocap.dll")==0);
     context.settings.bools["timeBasedFramePose"]=false;
     context.log.clear();
     loadSettings();
@@ -71,46 +71,46 @@ void harnessTests(const vr::DriverPose_t& tracker,uint32_t device) {
     context.log.clear();
     loadSettings();
     require(context.log.contains("FlugelKranz flags: observeFrames=0 correctFramePose=0 timeBasedFramePose=0"));
-    require(std::strcmp(physicalPoseDrivers,"driver_slimevr.dll,driver_rebocap.dll")==0);
+    require(std::strcmp(callerPolicy.physicalPoseDrivers,"driver_slimevr.dll,driver_rebocap.dll")==0);
     observeFrames=correctFramePose=timeBasedFramePose=false;
 
     // Device properties: only a listed tracking system is anchored, and the answer is cached.
-    std::snprintf(hmdAnchoredSystems,sizeof(hmdAnchoredSystems),"%s","SlimeVR");
+    std::snprintf(callerPolicy.hmdAnchoredSystems,sizeof(callerPolicy.hmdAnchoredSystems),"%s","SlimeVR");
     context.properties.trackingSystems={{7,"slimevr"},{8,"lighthouse"}};
-    propertiesReady=true;
-    require(classify(7)==2 && context.log.contains("device 7 (slimevr) follows the flown HMD"));
-    require(classify(8)==1 && classify(9)==1);
+    callerPolicy.propertiesReady=true;
+    require(callerPolicy.classify(7)==2 && context.log.contains("device 7 (slimevr) follows the flown HMD"));
+    require(callerPolicy.classify(8)==1 && callerPolicy.classify(9)==1);
     context.properties.trackingSystems.clear();
-    require(classify(7)==2);
-    hmdAnchoredSystems[0]=0;
+    require(callerPolicy.classify(7)==2);
+    callerPolicy.hmdAnchoredSystems[0]=0;
 
     // IPC: a fresh valid command is taken; a paused app keeps it without blocking.
     harness::useIpc();
     const flight::Pose flight{0,std::sqrt(0.5),0,std::sqrt(0.5),3,-1,2};
     harness::publish(flight);
-    {std::lock_guard<std::mutex> lock(gate);refresh();}
-    require(same(command,flight) && lastHeartbeat!=0);
+    {std::lock_guard<std::mutex> lock(gate);ipc.refresh();}
+    require(same(ipc.command,flight) && ipc.lastHeartbeat!=0);
     originals[0]=storingOriginal;
     {
         harness::AppHoldsIpc paused;
-        const auto before=state->samples[device].timestamp;
+        const auto before=ipc.state->samples[device].timestamp;
         const auto start=std::chrono::steady_clock::now();
         updated(0,expectedHost,device,tracker,sizeof(tracker));
         require(std::chrono::steady_clock::now()-start<std::chrono::milliseconds(50));
-        require(state->samples[device].timestamp==before); // the sample is skipped, not waited for
+        require(ipc.state->samples[device].timestamp==before); // the sample is skipped, not waited for
         const auto expected=flight::apply(tracker,flight);
         require(std::memcmp(&forwardedPose,&expected,sizeof(expected))==0);
     }
     updated(0,expectedHost,device,tracker,sizeof(tracker));
-    require(state->samples[device].timestamp!=0 && (state->samples[device].flags&3u)==3u);
+    require(ipc.state->samples[device].timestamp!=0 && (ipc.state->samples[device].flags&3u)==3u);
     // An invalid command or a dead client drops to identity at once.
     harness::publish(flight::Pose{0,0,0,2,0,0,0});
-    {std::lock_guard<std::mutex> lock(gate);refresh();}
-    require(flight::isIdentity(command) && lastHeartbeat==0);
+    {std::lock_guard<std::mutex> lock(gate);ipc.refresh();}
+    require(flight::isIdentity(ipc.command) && ipc.lastHeartbeat==0);
     harness::publish(flight);
-    WaitForSingleObject(ipcMutex,INFINITE);state->clientHeartbeat=GetTickCount64()-600;ReleaseMutex(ipcMutex);
-    {std::lock_guard<std::mutex> lock(gate);refresh();}
-    require(flight::isIdentity(command) && state->owner==0 && state->enabled==0);
+    WaitForSingleObject(ipc.ipcMutex,INFINITE);ipc.state->clientHeartbeat=GetTickCount64()-600;ReleaseMutex(ipc.ipcMutex);
+    {std::lock_guard<std::mutex> lock(gate);ipc.refresh();}
+    require(flight::isIdentity(ipc.command) && ipc.state->owner==0 && ipc.state->enabled==0);
 
     // Readback: a listed caller gets the flight removed; anyone else gets vrserver's pose.
     harness::publish(flight);
@@ -200,7 +200,7 @@ void generationTests(const vr::DriverPose_t& tracker,uint32_t device) {
     require(flight::matrixError(poses[device].mDeviceToAbsoluteTracking,body)<1e-5);
     harness::publish(a);updated(0,expectedHost,device,tracker,sizeof(tracker));
     require(!readback.Inspect(device).reordered && same(readback.Inspect(device).applied,a));
-    for(auto& classification:anchoredDevices) classification.store(1);
+    for(auto& classification:callerPolicy.anchoredDevices) classification.store(1);
     harness::publish(a);
     for(uint32_t d=0;d<12;d++) updated(0,expectedHost,d,tracker,sizeof(tracker));
     nextCommand=b;rawOriginal=batchReadback;
@@ -241,7 +241,7 @@ int main() {
         && readback.Inspect(device).physical[2]==body.pz);
 
     // A stale command (no heartbeat for 500 ms) falls back to identity.
-    command=flight;lastHeartbeat=GetTickCount64()-600;
+    ipc.command=flight;ipc.lastHeartbeat=GetTickCount64()-600;
     expectedPending=flight::Pose{};expectedCommitted=flight;
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     require(forwardedCount==3 && std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);

@@ -13,22 +13,22 @@
 #include "Transform.h"
 #include "FrameHistory.h"
 #include "PoseReadbackHistory.h"
+#include "DriverIpc.h"
+#include "PhysicalPoseCallerPolicy.h"
 
 namespace {
 flight::PoseReadbackHistory readback;
+flight::DriverIpc ipc;
+flight::PhysicalPoseCallerPolicy callerPolicy;
 using Callback=void(*)(void*,uint32_t,const vr::DriverPose_t&,uint32_t);
 Callback originals[2]{};
 void* targets[2]{};
-HANDLE mapping=nullptr,ipcMutex=nullptr;
-flight::State* state=nullptr;
 std::mutex gate;
 std::atomic<unsigned> inFlight{0};
 struct CallbackScope {
     CallbackScope(){inFlight.fetch_add(1);}
     ~CallbackScope(){inFlight.fetch_sub(1);}
 };
-flight::Pose command;
-uint64_t lastHeartbeat=0;
 // Direct Mode diagnostics and opt-in render-pose correction. Textures are untouched.
 using Added=bool(*)(void*,const char*,vr::ETrackedDeviceClass,vr::ITrackedDeviceServerDriver*);
 using Component=void*(*)(void*,const char*);
@@ -52,12 +52,6 @@ double frameTimeMs() {
     return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 bool observerStopping=false; // protected by observerGate
-// SlimeVR-style solvers build their skeleton around the HMD pose they read back
-// from SteamVR, so their tracker poses already contain the flight translation.
-// 0 = not classified yet, 1 = own tracking, 2 = anchored to the flown HMD.
-std::array<std::atomic<uint8_t>,64> anchoredDevices{};
-char hmdAnchoredSystems[256]="";
-std::atomic<bool> propertiesReady{false};
 double physicalHead[3]{}; // protected by gate
 // Solvers that read raw poses back from inside vrserver (SlimeVR and rebocap read the
 // HMD this way) must see the physical body. Otherwise they rebuild the skeleton around
@@ -65,71 +59,16 @@ double physicalHead[3]{}; // protected by gate
 using RawPoses=void(*)(void*,float,vr::TrackedDevicePose_t*,uint32_t);
 RawPoses rawOriginal=nullptr;
 void* rawTarget=nullptr;
-char physicalPoseDrivers[256]="driver_slimevr.dll,driver_rebocap.dll";
-// Call sites are classified once each and cached lock-free, so the hot path takes
-// neither a mutex nor the loader lock.
-std::array<std::atomic<void*>,8> physicalCallSites{};
-std::array<std::atomic<void*>,8> flownCallSites{};
-std::mutex callSiteGate; // only while classifying a call site seen for the first time
-
-bool servesPhysicalPoses(void* returnAddress) {
-    for(const auto& site:physicalCallSites) if(site.load(std::memory_order_relaxed)==returnAddress) return true;
-    for(const auto& site:flownCallSites) if(site.load(std::memory_order_relaxed)==returnAddress) return false;
-    std::lock_guard<std::mutex> lock(callSiteGate);
-    char name[MAX_PATH]{};
-    HMODULE module=nullptr;
-    if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        static_cast<LPCWSTR>(returnAddress),&module)) {
-        wchar_t path[MAX_PATH]{};
-        const DWORD length=GetModuleFileNameW(module,path,MAX_PATH);
-        const wchar_t* file=path;
-        for(DWORD i=0;i<length;i++) if(path[i]==L'\\' || path[i]==L'/') file=path+i+1;
-        WideCharToMultiByte(CP_UTF8,0,file,-1,name,sizeof(name),nullptr,nullptr);
-    }
-    const bool physical=name[0] && flight::listContains(physicalPoseDrivers,name);
-    for(auto& site:physical?physicalCallSites:flownCallSites) {
-        if(site.load()==returnAddress) break;
-        void* expected=nullptr;
-        if(site.compare_exchange_strong(expected,returnAddress)) {
-            char message[MAX_PATH+96];
-            std::snprintf(message,sizeof(message),"FlugelKranz: raw poses for %s: %s",name[0]?name:"(unknown module)",physical?"physical (flight removed)":"flown");
-            vr::VRDriverLog()->Log(message);
-            break;
-        }
-    }
-    return physical;
-}
-
 void rawPoses(void* host,float prediction,vr::TrackedDevicePose_t* poses,uint32_t count) {
     CallbackScope scope;
     const auto caller=_ReturnAddress();
     const auto committedBefore=readback.CaptureCommitted();
     rawOriginal(host,prediction,poses,count);
-    if(!poses || !count || !servesPhysicalPoses(caller)) return;
+    if(!poses || !count || !callerPolicy.servesPhysicalPoses(caller)) return;
     flight::PoseReadbackHistory::ReadbackTally tally;
     readback.readbackByGeneration(poses,count,committedBefore,tally);
 }
 bool physicalHeadValid=false; // protected by gate
-
-uint8_t classify(uint32_t device) {
-    if(device>=anchoredDevices.size()) return 1;
-    const uint8_t known=anchoredDevices[device].load();
-    if(known) return known;
-    if(!propertiesReady.load()) return 1;
-    vr::ETrackedPropertyError error=vr::TrackedProp_Success;
-    auto& properties=*vr::VRProperties();
-    auto system=properties.GetStringProperty(properties.TrackedDeviceToPropertyContainer(device),vr::Prop_TrackingSystemName_String,&error);
-    // A driver may submit a pose before its properties are readable; ask again next time.
-    if(error==vr::TrackedProp_NotYetAvailable || error==vr::TrackedProp_InvalidDevice) return 1;
-    const uint8_t result=error==vr::TrackedProp_Success && flight::listContains(hmdAnchoredSystems,system.c_str())?2:1;
-    anchoredDevices[device].store(result);
-    if(result==2) {
-        char message[256];
-        std::snprintf(message,sizeof(message),"FlugelKranz: device %u (%s) follows the flown HMD; applying rotation about it only",device,system.c_str());
-        vr::VRDriverLog()->Log(message);
-    }
-    return result;
-}
 
 void observedSubmit(void* self,const Layer(&eyes)[2]) {
     CallbackScope scope;
@@ -144,11 +83,11 @@ void observedSubmit(void* self,const Layer(&eyes)[2]) {
     uint64_t headTime=0;
     bool sampled=false;
     if(log && gate.try_lock()) {
-        sampledCommand=command;
-        auto acquired=state?WaitForSingleObject(ipcMutex,0):WAIT_TIMEOUT;
+        sampledCommand=ipc.command;
+        auto acquired=ipc.state?WaitForSingleObject(ipc.ipcMutex,0):WAIT_TIMEOUT;
         if(acquired==WAIT_OBJECT_0 || acquired==WAIT_ABANDONED) {
-            head=state->samples[0].pose;headTime=state->samples[0].timestamp;
-            ReleaseMutex(ipcMutex);sampled=true;
+            head=ipc.state->samples[0].pose;headTime=ipc.state->samples[0].timestamp;
+            ReleaseMutex(ipc.ipcMutex);sampled=true;
         }
         gate.unlock();
     }
@@ -250,66 +189,36 @@ bool observedAdded(int index,void* host,const char* serial,vr::ETrackedDeviceCla
 bool added0(void* h,const char* s,vr::ETrackedDeviceClass c,vr::ITrackedDeviceServerDriver* d) {return observedAdded(0,h,s,c,d);}
 bool added1(void* h,const char* s,vr::ETrackedDeviceClass c,vr::ITrackedDeviceServerDriver* d) {return observedAdded(1,h,s,c,d);}
 
-bool enter(DWORD timeout=2) {
-    auto result=WaitForSingleObject(ipcMutex,timeout);
-    return result==WAIT_OBJECT_0 || result==WAIT_ABANDONED;
-}
-// Pose updates and RunFrame hold `gate`, so they only try the IPC mutex. Waiting for it
-// would stall every device's pose update whenever the app is paused while holding it
-// (a .NET GC, for example). A miss keeps the previous command and skips one sample.
-void refresh() {
-    auto now=GetTickCount64();
-    if (state && enter(0)) {
-        // Sample after acquisition: the client can publish while this thread is descheduled.
-        now=GetTickCount64();
-        state->driverHeartbeat=now;
-        if(state->owner && (now<state->clientHeartbeat || now-state->clientHeartbeat>=500)) {
-            state->owner=0;state->enabled=0;
-        }
-        if(state->owner && state->enabled && now>=state->clientHeartbeat
-            && now-state->clientHeartbeat<500 && flight::valid(state->command)) {
-            command=state->command; lastHeartbeat=state->clientHeartbeat;
-        } else { command={}; lastHeartbeat=0; }
-        ReleaseMutex(ipcMutex);
-    }
-    if(!lastHeartbeat || now-lastHeartbeat>=500) command={};
-}
 void updated(int index,void* host,uint32_t device,const vr::DriverPose_t& input,uint32_t size) {
     CallbackScope scope;
     auto received=frameTimeMs();
     // Never inspect an unknown ABI-sized pose.
     if(size!=sizeof(vr::DriverPose_t)) { originals[index](host,device,input,size); return; }
-    const bool anchored=device!=0 && classify(device)==2;
+    const bool anchored=device!=0 && callerPolicy.classify(device)==2;
     vr::DriverPose_t output;
     flight::Pose transform;
     uint64_t generation=0;
     {
         std::lock_guard<std::mutex> lock(gate);
-        refresh();
-        if(state && device<64 && enter(0)) {
-            auto& sample=state->samples[device];
-            sample.pose=flight::physical(input);
-            sample.flags=(input.deviceIsConnected?1u:0u)|(input.poseIsValid?2u:0u);
-            sample.timestamp=GetTickCount64();
-            ReleaseMutex(ipcMutex);
-        }
+        ipc.refresh();
+        ipc.PublishSample(device,input);
         if(device==0 && input.poseIsValid && input.deviceIsConnected) {
             auto head=flight::physical(input);
             if(flight::valid(head)) {physicalHead[0]=head.px;physicalHead[1]=head.py;physicalHead[2]=head.pz;physicalHeadValid=true;}
         }
-        transform=command;
+        transform=ipc.command;
         if(anchored) {
             // The solver already moved these trackers with the flown HMD it read back.
             // Rotate them about where that HMD is now instead of moving them again.
             double flownHead[3];
-            flight::transformPoint(command,physicalHead,flownHead);
-            transform=physicalHeadValid?flight::aboutPivot(command,flownHead):flight::Pose{};
+            flight::transformPoint(ipc.command,physicalHead,flownHead);
+            transform=physicalHeadValid?flight::aboutPivot(ipc.command,flownHead):flight::Pose{};
         }
         output=flight::apply(input,transform);
         if(device<64) generation=readback.BeginForward(device,transform,flight::physical(input));
         if(device==0 && correctFramePose) {
             std::lock_guard<std::mutex> historyLock(historyGate);
-            frameHistory.add(received,output,command,&input);
+            frameHistory.add(received,output,ipc.command,&input);
         }
     }
     originals[index](host,device,output,size);
@@ -331,18 +240,18 @@ void loadSettings() {
     observeFrames=readFlag("observeFrames",false);
     correctFramePose=readFlag("correctFramePose",false);
     timeBasedFramePose=readFlag("timeBasedFramePose",false);
-    char configured[sizeof(hmdAnchoredSystems)]{};
+    char configured[sizeof(callerPolicy.hmdAnchoredSystems)]{};
     vr::EVRSettingsError settingsError=vr::VRSettingsError_None;
     vr::VRSettings()->GetString("driver_flugelkranz","hmdAnchoredTrackingSystems",configured,sizeof(configured),&settingsError);
-    if(settingsError==vr::VRSettingsError_None) std::memcpy(hmdAnchoredSystems,configured,sizeof(configured));
+    if(settingsError==vr::VRSettingsError_None) std::memcpy(callerPolicy.hmdAnchoredSystems,configured,sizeof(configured));
     char message[320];
-    std::snprintf(message,sizeof(message),"FlugelKranz: HMD-anchored tracking systems: '%s'",hmdAnchoredSystems);
+    std::snprintf(message,sizeof(message),"FlugelKranz: HMD-anchored tracking systems: '%s'",callerPolicy.hmdAnchoredSystems);
     vr::VRDriverLog()->Log(message);
-    char drivers[sizeof(physicalPoseDrivers)]{};
+    char drivers[sizeof(callerPolicy.physicalPoseDrivers)]{};
     settingsError=vr::VRSettingsError_None;
     vr::VRSettings()->GetString("driver_flugelkranz","physicalPoseDrivers",drivers,sizeof(drivers),&settingsError);
-    if(settingsError==vr::VRSettingsError_None) std::memcpy(physicalPoseDrivers,drivers,sizeof(drivers));
-    std::snprintf(message,sizeof(message),"FlugelKranz: physical raw poses for drivers: '%s'",physicalPoseDrivers);
+    if(settingsError==vr::VRSettingsError_None) std::memcpy(callerPolicy.physicalPoseDrivers,drivers,sizeof(drivers));
+    std::snprintf(message,sizeof(message),"FlugelKranz: physical raw poses for drivers: '%s'",callerPolicy.physicalPoseDrivers);
     vr::VRDriverLog()->Log(message);
     // One line with every behaviour flag, so a log always says which paths were live.
     std::snprintf(message,sizeof(message),"FlugelKranz flags: observeFrames=%d correctFramePose=%d timeBasedFramePose=%d",
@@ -355,20 +264,13 @@ class Provider final : public vr::IServerTrackedDeviceProvider {
 public:
     vr::EVRInitError Init(vr::IVRDriverContext* context) override {
         VR_INIT_SERVER_DRIVER_CONTEXT(context);
-        ipcMutex=CreateMutexW(nullptr,FALSE,L"Local\\FlugelKranz.Driver.Mutex.v1");
-        mapping=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(flight::State),L"Local\\FlugelKranz.Driver.State.v1");
-        if(!mapping || !ipcMutex) {Cleanup();return vr::VRInitError_Driver_Failed;}
-        state=static_cast<flight::State*>(MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(flight::State)));
-        if(!state || !enter()) {Cleanup();return vr::VRInitError_Driver_Failed;}
-        new(state) flight::State{};
-        state->driverHeartbeat=GetTickCount64();
-        ReleaseMutex(ipcMutex);
+        if(!ipc.Open()) {Cleanup();return vr::VRInitError_Driver_Failed;}
         auto result=MH_Initialize();
         if(result!=MH_OK) {Cleanup();return vr::VRInitError_Driver_Failed;}
         minHookInitialized=true;
         observerStopping=false;
         loadSettings();
-        propertiesReady=true;
+        callerPolicy.propertiesReady=true;
         const char* versions[]={"IVRServerDriverHost_006","IVRServerDriverHost_005"};
         void* detours[]={reinterpret_cast<void*>(updated0),reinterpret_cast<void*>(updated1)};
         void* addedDetours[]={reinterpret_cast<void*>(added0),reinterpret_cast<void*>(added1)};
@@ -393,7 +295,7 @@ public:
             installed++;
         }
         if(!installed) {Cleanup();return vr::VRInitError_Driver_Failed;}
-        if(physicalPoseDrivers[0]) {
+        if(callerPolicy.physicalPoseDrivers[0]) {
             vr::EVRInitError hostError=vr::VRInitError_None;
             auto host=context->GetGenericInterface("IVRServerDriverHost_006",&hostError);
             auto target=host && hostError==vr::VRInitError_None?(*reinterpret_cast<void***>(host))[6]:nullptr;
@@ -428,22 +330,20 @@ public:
         for(auto& target:targets) if(target) {MH_RemoveHook(target);target=nullptr;}
         if(rawTarget) {MH_RemoveHook(rawTarget);rawTarget=nullptr;}
         std::lock_guard<std::mutex> lock(gate);
-        if(state) {UnmapViewOfFile(state);state=nullptr;}
-        if(mapping) {CloseHandle(mapping);mapping=nullptr;}
-        if(ipcMutex) {CloseHandle(ipcMutex);ipcMutex=nullptr;}
+        ipc.Close();
         if(minHookInitialized) {MH_Uninitialize();minHookInitialized=false;}
-        command={};lastHeartbeat=0;
+        ipc.command={};ipc.lastHeartbeat=0;
         physicalHeadValid=false;
-        for(auto& known:anchoredDevices) known.store(0);
+        for(auto& known:callerPolicy.anchoredDevices) known.store(0);
         readback.Reset();
-        for(auto& site:physicalCallSites) site.store(nullptr);
-        for(auto& site:flownCallSites) site.store(nullptr);
-        propertiesReady=false;
+        for(auto& site:callerPolicy.physicalCallSites) site.store(nullptr);
+        for(auto& site:callerPolicy.flownCallSites) site.store(nullptr);
+        callerPolicy.propertiesReady=false;
         frameHistory.clear();
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }
     const char* const* GetInterfaceVersions() override {return vr::k_InterfaceVersions;}
-    void RunFrame() override {std::lock_guard<std::mutex> lock(gate);refresh();}
+    void RunFrame() override {std::lock_guard<std::mutex> lock(gate);ipc.refresh();}
     bool ShouldBlockStandbyMode() override {return false;}
     void EnterStandby() override {}
     void LeaveStandby() override {}

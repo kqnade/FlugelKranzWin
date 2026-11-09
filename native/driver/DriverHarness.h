@@ -110,17 +110,17 @@ inline void shippedDefaults() {
 // A real IPC mutex and shared state, as the app would map them.
 inline flight::State& ipcState() {static flight::State instance;return instance;}
 inline void useIpc() {
-    if(!ipcMutex) ipcMutex=CreateMutexW(nullptr,FALSE,nullptr);
+    if(!ipc.ipcMutex) ipc.ipcMutex=CreateMutexW(nullptr,FALSE,nullptr);
     new(&ipcState()) flight::State{};
-    state=&ipcState();
+    ipc.state=&ipcState();
 }
 // The app side: publish a command with a fresh heartbeat, as DriverConnection does.
 inline void publish(flight::Pose transform,bool enabled=true) {
-    WaitForSingleObject(ipcMutex,INFINITE);
-    state->owner=1;state->enabled=enabled?1:0;
-    state->clientHeartbeat=GetTickCount64();
-    state->command=transform;
-    ReleaseMutex(ipcMutex);
+    WaitForSingleObject(ipc.ipcMutex,INFINITE);
+    ipc.state->owner=1;ipc.state->enabled=enabled?1:0;
+    ipc.state->clientHeartbeat=GetTickCount64();
+    ipc.state->command=transform;
+    ReleaseMutex(ipc.ipcMutex);
 }
 // Holds the IPC mutex from another thread (a Windows mutex is recursive for its owner),
 // as the app does while it is paused inside its lock.
@@ -128,7 +128,7 @@ class AppHoldsIpc {
     HANDLE acquired=CreateEventW(nullptr,TRUE,FALSE,nullptr),release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     std::thread holder;
 public:
-    AppHoldsIpc():holder([this]{WaitForSingleObject(ipcMutex,INFINITE);SetEvent(acquired);WaitForSingleObject(release,INFINITE);ReleaseMutex(ipcMutex);}) {
+    AppHoldsIpc():holder([this]{WaitForSingleObject(ipc.ipcMutex,INFINITE);SetEvent(acquired);WaitForSingleObject(release,INFINITE);ReleaseMutex(ipc.ipcMutex);}) {
         WaitForSingleObject(acquired,INFINITE);
     }
     ~AppHoldsIpc() {SetEvent(release);holder.join();CloseHandle(acquired);CloseHandle(release);}
@@ -145,12 +145,12 @@ inline std::string executableName() {
     return name;
 }
 inline void forgetCallSites() {
-    for(auto& site:physicalCallSites) site.store(nullptr);
-    for(auto& site:flownCallSites) site.store(nullptr);
+    for(auto& site:callerPolicy.physicalCallSites) site.store(nullptr);
+    for(auto& site:callerPolicy.flownCallSites) site.store(nullptr);
 }
 inline void servePhysicalPosesToThisProcess(bool physical=true) {
     const auto name=physical?executableName():std::string("driver_slimevr.dll");
-    std::snprintf(physicalPoseDrivers,sizeof(physicalPoseDrivers),"%s",name.c_str());
+    std::snprintf(callerPolicy.physicalPoseDrivers,sizeof(callerPolicy.physicalPoseDrivers),"%s",name.c_str());
     forgetCallSites();
 }
 }
