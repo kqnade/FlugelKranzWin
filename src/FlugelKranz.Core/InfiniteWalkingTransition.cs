@@ -50,7 +50,7 @@ public sealed class InfiniteWalkingTransition
             throw new ArgumentException("Mode transition poses must be valid.");
         Quaternion difference = Quaternion.Normalize(
             current.Orientation * Quaternion.Conjugate(original.Orientation));
-        Quaternion yaw = FreeFlightManipulator.TwistAroundAxis(difference, Vector3.UnitY);
+        Quaternion yaw = RotationMath.TwistAroundAxis(difference, Vector3.UnitY);
         Quaternion orientation = Quaternion.Normalize(yaw * original.Orientation);
         // Offset maps physical Standing coordinates into the flown Standing space.
         // Keep the captured pivot's X/Z while restoring its connection-baseline Y.

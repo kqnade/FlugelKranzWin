@@ -1,4 +1,5 @@
 using System.Numerics;
+using static FlugelKranz.Core.RotationMath;
 
 namespace FlugelKranz.Core;
 
@@ -740,61 +741,6 @@ public sealed partial class FreeFlightManipulator
         turn.UseTwoHandPivotForInertia = false;
     }
 
-    internal static Quaternion IntegrateRotation(Quaternion rotation, Vector3 velocity, float dt)
-    {
-        float speed = velocity.Length();
-        if (speed <= 0 || dt <= 0)
-            return rotation;
-
-        return Quaternion.Normalize(Quaternion.CreateFromAxisAngle(velocity / speed, speed * dt) * rotation);
-    }
-
-    internal static Vector3 RotationVelocity(Quaternion from, Quaternion to, float dt)
-    {
-        var delta = Quaternion.Normalize(to * Quaternion.Conjugate(from));
-        if (delta.W < 0)
-            delta = -delta;
-
-        float angle = 2 * MathF.Acos(Math.Clamp(delta.W, -1, 1));
-        float sine = MathF.Sqrt(MathF.Max(0, 1 - delta.W * delta.W));
-        return sine < 0.00001f
-            ? Vector3.Zero
-            : new Vector3(delta.X, delta.Y, delta.Z) / sine * (angle / dt);
-    }
-
-    internal static Quaternion TwistAroundAxis(Quaternion rotation, Vector3 axis)
-    {
-        axis = SafeDirection(axis);
-        if (axis.LengthSquared() <= 0)
-            return Quaternion.Identity;
-
-        var imaginary = new Vector3(rotation.X, rotation.Y, rotation.Z);
-        var projected = axis * Vector3.Dot(imaginary, axis);
-        var twist = new Quaternion(projected, rotation.W);
-        return twist.LengthSquared() <= 0.0000000001f
-            ? Quaternion.Identity
-            : Quaternion.Normalize(twist);
-    }
-
-    private static float RotationAngleAroundAxis(Quaternion rotation, Vector3 axis)
-    {
-        axis = SafeDirection(axis);
-        if (axis.LengthSquared() <= 0)
-            return 0;
-
-        rotation = Quaternion.Normalize(rotation);
-        if (rotation.W < 0)
-            rotation = -rotation;
-
-        var imaginary = new Vector3(rotation.X, rotation.Y, rotation.Z);
-        float imaginaryLength = imaginary.Length();
-        if (imaginaryLength <= 0.0000001f)
-            return 0;
-
-        float angle = 2 * MathF.Atan2(imaginaryLength, MathF.Max(0, rotation.W));
-        return Vector3.Dot(imaginary / imaginaryLength * angle, axis);
-    }
-
     private static Quaternion HandOrientation(InputFrame frame, byte hands) => hands switch
     {
         LeftHand => frame.Left.Pose.Orientation,
@@ -810,16 +756,6 @@ public sealed partial class FreeFlightManipulator
         BothHands => (frame.Left.Pose.Position + frame.Right.Pose.Position) * 0.5f,
         _ => Vector3.Zero
     };
-
-    private static Quaternion Average(Quaternion left, Quaternion right)
-    {
-        if (Quaternion.Dot(left, right) < 0)
-            right = -right;
-        return Quaternion.Normalize(Quaternion.Slerp(left, right, 0.5f));
-    }
-
-    private static Vector3 SafeDirection(Vector3 value) =>
-        value.LengthSquared() <= 0.0000000001f ? Vector3.Zero : Vector3.Normalize(value);
 
     private static bool HandsUsable(InputFrame frame, byte hands) =>
         ((hands & LeftHand) == 0 || Usable(frame.Left)) &&

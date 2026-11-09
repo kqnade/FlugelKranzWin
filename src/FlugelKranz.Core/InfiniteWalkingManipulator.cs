@@ -115,7 +115,7 @@ public sealed class InfiniteWalkingManipulator
         Quaternion currentInput = TurnInputOrientation(frame);
         Quaternion inputDelta = Quaternion.Normalize(
             currentInput * Quaternion.Conjugate(turnStartInputOrientation));
-        Quaternion yaw = FreeFlightManipulator.TwistAroundAxis(inputDelta, Vector3.UnitY);
+        Quaternion yaw = RotationMath.TwistAroundAxis(inputDelta, Vector3.UnitY);
         Quaternion target = Quaternion.Normalize(
             turnStartOffsetOrientation * Quaternion.Conjugate(yaw));
         bool rotated = 1 - MathF.Abs(Quaternion.Dot(targetOffset.Orientation, target)) > 0.0000001f;

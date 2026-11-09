@@ -71,7 +71,7 @@ public sealed class SpaceResetTransition
 
         // Looking exactly up or down has no horizontal forward direction. Preserve
         // the closest yaw component instead of choosing an arbitrary half turn.
-        return FreeFlightManipulator.TwistAroundAxis(headInRoot, Vector3.UnitY);
+        return RotationMath.TwistAroundAxis(headInRoot, Vector3.UnitY);
     }
 
     public static SpaceResetTransition CreateInfiniteWalking(
