@@ -17,13 +17,13 @@ flight::Pose expectedPending,expectedCommitted;
 void fakeOriginal(void* host,uint32_t device,const vr::DriverPose_t& pose,uint32_t size) {
     require(host==expectedHost);
     forwardedPose=pose;forwardedDevice=device;forwardedSize=size;forwardedCount++;
-    if(size!=sizeof(vr::DriverPose_t) || device>=lastApplied.size()) return;
+    if(size!=sizeof(vr::DriverPose_t) || device>=64) return;
     // The readback must see the new transform as pending, not yet committed, while
     // vrserver may still hold the previous pose.
-    std::lock_guard<std::mutex> lock(appliedGate);
-    require(forwarding[device]);
-    require(same(pendingApplied[device],expectedPending));
-    require(same(lastApplied[device],expectedCommitted));
+
+    require(readback.Inspect(device).forwarding);
+    require(same(readback.Inspect(device).pending,expectedPending));
+    require(same(readback.Inspect(device).applied,expectedCommitted));
 }
 void keepCommand(flight::Pose transform) {
     command=transform;
@@ -115,7 +115,7 @@ void harnessTests(const vr::DriverPose_t& tracker,uint32_t device) {
     // Readback: a listed caller gets the flight removed; anyone else gets vrserver's pose.
     harness::publish(flight);
     updated(0,expectedHost,device,tracker,sizeof(tracker));
-    require(same(lastApplied[device],flight));
+    require(same(readback.Inspect(device).applied,flight));
     rawOriginal=serverReadback;
     harness::servePhysicalPosesToThisProcess();
     std::array<vr::TrackedDevicePose_t,16> poses{};
@@ -177,7 +177,7 @@ void generationTests(const vr::DriverPose_t& tracker,uint32_t device) {
         rawOriginal=straddlingReadback;nextCommand=after;straddle=true;
         std::array<vr::TrackedDevicePose_t,16> poses{};
         rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
-        require(!straddle && same(lastApplied[device],after));
+        require(!straddle && same(readback.Inspect(device).applied,after));
         require(flight::matrixError(poses[device].mDeviceToAbsoluteTracking,body)<1e-5);
         rawOriginal=serverReadback;
     };
@@ -194,12 +194,12 @@ void generationTests(const vr::DriverPose_t& tracker,uint32_t device) {
     originals[0]=nestingOriginal;
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     originals[0]=storingOriginal;
-    require(!nestNext && reordered[device] && same(lastApplied[device],c));
+    require(!nestNext && readback.Inspect(device).reordered && same(readback.Inspect(device).applied,c));
     std::array<vr::TrackedDevicePose_t,16> poses{};
     rawPoses(expectedHost,0,poses.data(),static_cast<uint32_t>(poses.size()));
     require(flight::matrixError(poses[device].mDeviceToAbsoluteTracking,body)<1e-5);
     harness::publish(a);updated(0,expectedHost,device,tracker,sizeof(tracker));
-    require(!reordered[device] && same(lastApplied[device],a));
+    require(!readback.Inspect(device).reordered && same(readback.Inspect(device).applied,a));
     for(auto& classification:anchoredDevices) classification.store(1);
     harness::publish(a);
     for(uint32_t d=0;d<12;d++) updated(0,expectedHost,d,tracker,sizeof(tracker));
@@ -225,7 +225,7 @@ int main() {
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     require(forwardedCount==1 && forwardedDevice==device && forwardedSize==sizeof(tracker));
     require(std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
-    require(!forwarding[device] && same(lastApplied[device],flight::Pose{}) && inFlight==0);
+    require(!readback.Inspect(device).forwarding && same(readback.Inspect(device).applied,flight::Pose{}) && inFlight==0);
 
     // Flight: the forwarded pose carries the command, which is committed only after
     // the original returns.
@@ -235,24 +235,24 @@ int main() {
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     const auto expected=flight::apply(tracker,flight);
     require(forwardedCount==2 && std::memcmp(&forwardedPose,&expected,sizeof(expected))==0);
-    require(!forwarding[device] && same(lastApplied[device],flight) && inFlight==0);
+    require(!readback.Inspect(device).forwarding && same(readback.Inspect(device).applied,flight) && inFlight==0);
     const auto body=flight::physical(tracker);
-    require(pendingPhysical[device][0]==body.px && pendingPhysical[device][1]==body.py
-        && pendingPhysical[device][2]==body.pz);
+    require(readback.Inspect(device).physical[0]==body.px && readback.Inspect(device).physical[1]==body.py
+        && readback.Inspect(device).physical[2]==body.pz);
 
     // A stale command (no heartbeat for 500 ms) falls back to identity.
     command=flight;lastHeartbeat=GetTickCount64()-600;
     expectedPending=flight::Pose{};expectedCommitted=flight;
     updated(0,expectedHost,device,tracker,sizeof(tracker));
     require(forwardedCount==3 && std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
-    require(same(lastApplied[device],flight::Pose{}));
+    require(same(readback.Inspect(device).applied,flight::Pose{}));
 
     // An unknown ABI size is passed through untouched and records nothing.
     keepCommand(flight);
     updated(0,expectedHost,device,tracker,sizeof(tracker)-4);
     require(forwardedCount==4 && forwardedSize==sizeof(tracker)-4);
     require(std::memcmp(&forwardedPose,&tracker,sizeof(tracker))==0);
-    require(same(lastApplied[device],flight::Pose{}) && inFlight==0);
+    require(same(readback.Inspect(device).applied,flight::Pose{}) && inFlight==0);
 
     std::puts("pose-update detour: identity pass-through, flight, pending/commit order, stale command, unknown ABI: passed");
 
