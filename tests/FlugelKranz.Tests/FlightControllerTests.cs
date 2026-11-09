@@ -366,6 +366,71 @@ public class FlightControllerTests
         Assert.Equal(start.Z, runtime.CurrentOffset.Transform(pivot).Z, 4);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplyFailureStopsWorkerAndAttemptsRestoreBeforeDispose(bool restoreFails)
+    {
+        var runtime = new FakeRuntime();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, FreeFlightSettings);
+        controller.SetEnabled(true);
+        await WaitForFrame(runtime, Frame(0, 0));
+        await WaitForFrame(runtime, Frame(1, 0));
+        runtime.ThrowOnApply = true;
+        runtime.ThrowOnRestore = restoreFails;
+        runtime.ThrowOnDispose = restoreFails;
+        runtime.Frame = Frame(1, 1);
+        await Wait(() => progress.Statuses.Any(s => !s.Connected && s.Message.Contains("apply failed")));
+
+        Assert.Equal(new[] { "apply", "restore", "dispose" }, runtime.FailuresAndCleanup.ToArray());
+        var final = progress.Statuses.Last();
+        Assert.False(final.Enabled);
+        if (restoreFails)
+        {
+            Assert.Contains("restore failed", final.Message);
+            Assert.Contains("dispose failed", final.Message);
+        }
+        else Assert.Equal(runtime.OriginalOffset, runtime.CurrentOffset);
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("reset")]
+    [InlineData("free")]
+    [InlineData("dashboard")]
+    public async Task WalkingTransitionCanBeInterruptedWithoutContinuingDescent(string action)
+    {
+        var runtime = new FakeRuntime();
+        runtime.Apply(new(Quaternion.CreateFromYawPitchRoll(0.4f, 0.7f, -0.3f), new(1, 2, 3)));
+        var settings = FreeFlightSettings();
+        var progress = new Recorder();
+        await using var controller = new FlightController(() => runtime, progress, () => settings);
+        controller.SetEnabled(true);
+        await Wait(() => progress.Statuses.Any(s => s.Connected));
+        settings = settings with { Mode = FlightMode.InfiniteWalking };
+        await Wait(() => progress.Statuses.Any(s => s.Message == "無限歩行モードへ戻しています…"));
+        RigidPose interrupted = default;
+        runtime.BeforeNextRead = () =>
+        {
+            interrupted = runtime.CurrentOffset;
+            switch (action)
+            {
+                case "off": controller.SetEnabled(false); break;
+                case "reset": controller.Reset(); break;
+                case "free": settings = settings with { Mode = FlightMode.FreeFlight }; break;
+                case "dashboard": runtime.Frame = Frame(0, 0) with { MotionSuspended = true }; break;
+            }
+        };
+        int reads = runtime.Reads;
+        await Wait(() => runtime.Reads > reads + 2);
+        var stopped = runtime.CurrentOffset;
+        await WaitForFrame(runtime, runtime.Frame);
+        Assert.Equal(stopped, runtime.CurrentOffset);
+        if (action == "reset") Assert.Equal(RigidPose.Identity, stopped);
+        else Assert.Equal(interrupted, stopped);
+    }
+
     private static InputFrame Frame(float grip, float x) => new(RigidPose.Identity, true,
         new(new(Quaternion.Identity, new(x, 0, 0)), grip, 0, 0, true),
         new(RigidPose.Identity, 0, 0, 0, true));
@@ -407,7 +472,9 @@ public class FlightControllerTests
         public int Reads => Volatile.Read(ref reads);
         public RigidPose OriginalOffset => RigidPose.Identity;
         public RigidPose CurrentOffset { get { lock (gate) return offset; } }
-        public volatile bool Disposed, ThrowOnRead, ThrowOnDispose;
+        public volatile bool Disposed, ThrowOnRead, ThrowOnDispose, ThrowOnApply, ThrowOnRestore;
+        public ConcurrentQueue<string> FailuresAndCleanup { get; } = new();
+        public Action? BeforeNextRead;
         public int Restores;
         public int BindingsOpened;
         public string InputDiagnostics => "test input snapshot";
@@ -417,13 +484,29 @@ public class FlightControllerTests
         private int reads;
         public InputFrame ReadPhysical()
         {
+            Interlocked.Exchange(ref BeforeNextRead, null)?.Invoke();
             Interlocked.Increment(ref reads);
             return ThrowOnRead ? throw new IOException("lost") : Frame;
         }
-        public void Apply(RigidPose value) { lock (gate) offset = value; }
-        public void Restore() { Restores++; Apply(OriginalOffset); }
+        public void Apply(RigidPose value)
+        {
+            if (ThrowOnApply)
+            {
+                FailuresAndCleanup.Enqueue("apply");
+                throw new IOException("apply failed");
+            }
+            lock (gate) offset = value;
+        }
+        public void Restore()
+        {
+            FailuresAndCleanup.Enqueue("restore");
+            Interlocked.Increment(ref Restores);
+            if (ThrowOnRestore) throw new IOException("restore failed");
+            lock (gate) offset = OriginalOffset;
+        }
         public void Dispose()
         {
+            FailuresAndCleanup.Enqueue("dispose");
             Disposed = true;
             if (ThrowOnDispose) throw new IOException("dispose failed");
         }
